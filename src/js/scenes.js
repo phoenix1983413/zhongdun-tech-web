@@ -1,22 +1,32 @@
 /* ============================================================
-   Three.js 场景集
-   - 首页 Hero：低空防御穹顶
-   - DX：三维电子沙盘
-   - RX：多智能体协同网络
-   - EX：知识图谱星云
-   工程约束（沿用参考站经验）：
-     · Three.js 动态 import()，仅用到时才下载
-     · DPR 上限 2；滚出视口 / 页面隐藏 → 渲染循环停车
+   Three.js 场景集 v2 ·「深空指挥舱」
+   - 首页 Hero：低空防御穹顶（Defense Dome）
+   - DX：三维电子沙盘（Tactical Sandbox）
+   - RX：多智能体协同网络（Swarm Mesh）
+   - EX：知识图谱星云（Knowledge Nebula）
+
+   渲染质量：
+     · ACES Filmic 色调映射 + sRGB 输出（真实的高光滚降，不再是死板纯色）
+     · 程序化 equirect 天空纹理 → scene.background + IBL 环境光（金属/玻璃材质有真实反射）
+     · Hemisphere + Point + Directional 三光源体系
+     · 自发光材质 + 加性辉光精灵 + UnrealBloom 泛光
+     · 指数雾，营造纵深与空气感
+   工程约束：
+     · Three.js / addons 全部动态 import()，只有用到才下载
+     · DPR 上限 2（Bloom 合成器上限 1.5）；滚出视口 / 页面隐藏 → 停车
      · prefers-reduced-motion → 只渲染一帧静态画面
-     · Three.js 加载失败 → 自动降级 Canvas 2D，页面绝不空白
+     · 任一环节失败 → 自动降级 Canvas 2D，页面绝不空白
    ============================================================ */
 
-const REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const REDUCE = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
+/* 统一色板（与 CSS 令牌一致） */
 const C = {
   blue: 0x0066cc,
   brand: 0x1e64c8,
+  sky: 0x2f86e0,
   cyan: 0x50aaff,
+  bright: 0x7cc6ff,
   light: 0x8cafd7,
   pale: 0xdcebfc,
 };
@@ -27,7 +37,161 @@ function loadThree() {
   return threePromise;
 }
 
-/* ---------- 鼠标视差 ---------- */
+let bloomPromise = null;
+function loadBloom() {
+  if (!bloomPromise) {
+    bloomPromise = Promise.all([
+      import('three/addons/postprocessing/EffectComposer.js'),
+      import('three/addons/postprocessing/RenderPass.js'),
+      import('three/addons/postprocessing/UnrealBloomPass.js'),
+      import('three/addons/postprocessing/OutputPass.js'),
+    ]).catch(() => null);
+  }
+  return bloomPromise;
+}
+
+/* ============================================================
+   程序化纹理
+   ============================================================ */
+
+/* 辉光精灵：径向渐变圆点（加性混合用） */
+let glowTex = null;
+function makeGlowTexture(THREE, renderer) {
+  if (glowTex) return glowTex;
+  const s = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.16, 'rgba(226,242,255,.92)');
+  grd.addColorStop(0.36, 'rgba(140,200,255,.45)');
+  grd.addColorStop(0.62, 'rgba(60,140,230,.14)');
+  grd.addColorStop(1, 'rgba(20,60,120,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, s, s);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  glowTex = t;
+  if (renderer) renderer.userData.__glow = t;
+  return t;
+}
+
+/* equirect 天空：深空底色 + 星点 + 两个品牌光斑 */
+const skyCache = {};
+function makeSkyTexture(THREE, variant) {
+  if (skyCache[variant]) return skyCache[variant];
+  const W = 1024, H = 512;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+
+  const tint = {
+    dome: ['#0a1c3a', '#071228', '#030711'],
+    dome2: ['#0a1c3a', '#071228', '#030711'],
+    sandbox: ['#0a2036', '#061426', '#030910'],
+    network: ['#0d1838', '#070f26', '#03060f'],
+    graph: ['#111a3c', '#0a1028', '#04060f'],
+  }[variant] || ['#0a1c3a', '#071228', '#030711'];
+
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, tint[0]);
+  grd.addColorStop(0.52, tint[1]);
+  grd.addColorStop(1, tint[2]);
+  g.fillStyle = grd;
+  g.fillRect(0, 0, W, H);
+
+  // 星点
+  for (let i = 0; i < 420; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const r = Math.random() * 1.15 + 0.25;
+    const a = Math.random() * 0.55 + 0.12;
+    g.fillStyle = 'rgba(210,232,255,' + a.toFixed(3) + ')';
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // 品牌光斑（主 + 副）
+  const blob = (cx, cy, rad, rgb, alpha) => {
+    const rg = g.createRadialGradient(cx, cy, 0, cx, cy, rad);
+    rg.addColorStop(0, 'rgba(' + rgb + ',' + alpha + ')');
+    rg.addColorStop(0.42, 'rgba(' + rgb + ',' + (alpha * 0.32).toFixed(3) + ')');
+    rg.addColorStop(1, 'rgba(' + rgb + ',0)');
+    g.fillStyle = rg;
+    g.fillRect(cx - rad, cy - rad, rad * 2, rad * 2);
+  };
+  blob(W * 0.28, H * 0.30, 300, '90,175,255', 0.60);
+  blob(W * 0.74, H * 0.52, 260, '30,100,200', 0.55);
+  blob(W * 0.52, H * 0.10, 220, '140,200,255', 0.34);
+
+  const t = new THREE.CanvasTexture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  skyCache[variant] = t;
+  return t;
+}
+
+/* 由天空纹理生成 IBL 环境贴图（金属/玻璃有真实反射） */
+function makeEnv(THREE, renderer, skyTex) {
+  try {
+    if (!renderer.userData.__env) {
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      pmrem.compileEquirectangularShader();
+      const rt = pmrem.fromEquirectangular(skyTex);
+      pmrem.dispose();
+      renderer.userData.__env = rt.texture;
+    }
+    return renderer.userData.__env;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* 地面网格纹理（径向渐隐的网格） */
+function makeGridTexture(THREE, size, div, strong) {
+  const S = 512;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, S, S);
+  const step = S / div;
+  g.strokeStyle = strong ? 'rgba(110,180,255,.62)' : 'rgba(90,155,230,.34)';
+  g.lineWidth = strong ? 2 : 1;
+  for (let i = 0; i <= div; i++) {
+    const p = Math.round(i * step) + 0.5;
+    g.beginPath(); g.moveTo(p, 0); g.lineTo(p, S); g.stroke();
+    g.beginPath(); g.moveTo(0, p); g.lineTo(S, p); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+/* 发光竖条（光柱）纹理 */
+function makeBeamTexture(THREE) {
+  const W = 8, H = 128;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, 'rgba(160,215,255,.95)');
+  grd.addColorStop(0.35, 'rgba(110,185,255,.42)');
+  grd.addColorStop(1, 'rgba(60,130,220,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, W, H);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/* ============================================================
+   工具
+   ============================================================ */
+
+/* 鼠标视差（阻尼跟随） */
 function makeParallax(stage) {
   let tx = 0, ty = 0, px = 0, py = 0;
   stage.addEventListener('pointermove', (e) => {
@@ -37,13 +201,29 @@ function makeParallax(stage) {
   });
   stage.addEventListener('pointerleave', () => { tx = 0; ty = 0; });
   return {
-    step() { px += (tx - px) * 0.06; py += (ty - py) * 0.06; return { x: px, y: py }; },
+    step() {
+      px += (tx - px) * 0.055;
+      py += (ty - py) * 0.055;
+      return { x: px, y: py };
+    },
   };
 }
 
-/* ---------- 渲染循环：尺寸自适应 + 视口停车 ---------- */
+/* 加性辉光精灵 */
+function halo(THREE, tex, color, size, opacity) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: true,
+  }));
+  sp.scale.setScalar(size);
+  return sp;
+}
+
+/* ============================================================
+   渲染循环：尺寸自适应 + 视口停车 + Bloom 合成
+   ============================================================ */
 function startScene(o) {
-  const { THREE, stage, scene, camera, renderer, update } = o;
+  const { THREE, stage, scene, camera, renderer, update, composer } = o;
 
   function resize() {
     const w = stage.clientWidth || 1;
@@ -52,6 +232,7 @@ function startScene(o) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); }
   }
   resize();
   window.addEventListener('resize', resize);
@@ -65,35 +246,39 @@ function startScene(o) {
   document.addEventListener('visibilitychange', () => { pageHidden = document.hidden; });
 
   const clock = new THREE.Clock();
-  let raf = null;
   function frame() {
-    raf = requestAnimationFrame(frame);
+    requestAnimationFrame(frame);
     if (!onScreen || pageHidden) return;
-    update(clock.getElapsedTime());
-    renderer.render(scene, camera);
+    const t = clock.getElapsedTime();
+    update(t);
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
   }
   update(0);
-  renderer.render(scene, camera);
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
   if (!REDUCE) frame();
 }
 
-/* ---------- Canvas 2D 降级 ---------- */
+/* ============================================================
+   Canvas 2D 降级（保留并升级：加发光，与新视觉一致）
+   ============================================================ */
 function fallback2d(canvas, variant) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const stage = canvas.parentElement || canvas;
-  let W = 0, H = 0, dpr = 1, raf = null, t = 0;
+  let W = 0, H = 0, raf = null, t = 0;
   const nodes = [];
 
   function build() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = stage.clientWidth || 1;
     H = stage.clientHeight || 1;
     canvas.width = W * dpr;
     canvas.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     nodes.length = 0;
-    const n = W < 600 ? 22 : 38;
+    const n = W < 600 ? 20 : 34;
     for (let i = 0; i < n; i++) {
       nodes.push({
         a: Math.random() * Math.PI * 2,
@@ -107,9 +292,16 @@ function fallback2d(canvas, variant) {
   function draw() {
     t += 0.016;
     ctx.clearRect(0, 0, W, H);
-    const cx = W / 2, cy = H * 0.62, R = Math.min(W, H) * 0.42;
+    const cx = W / 2, cy = H * 0.64, R = Math.min(W, H) * 0.42;
 
-    ctx.strokeStyle = 'rgba(30,100,200,.20)';
+    // 地平线辉光
+    const hg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.5);
+    hg.addColorStop(0, 'rgba(80,170,255,.20)');
+    hg.addColorStop(1, 'rgba(80,170,255,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(0, cy - R * 1.4, W, R * 2.8);
+
+    ctx.strokeStyle = 'rgba(110,180,255,.26)';
     ctx.lineWidth = 1;
     const rings = variant === 'graph' ? 6 : 5;
     for (let k = 1; k <= rings; k++) {
@@ -117,8 +309,8 @@ function fallback2d(canvas, variant) {
       ctx.ellipse(cx, cy, R * (0.28 + k * 0.14), R * (0.15 + k * 0.075), 0, Math.PI, Math.PI * 2);
       ctx.stroke();
     }
-    for (let k = 0; k < 10; k++) {
-      const a = k / 10 * Math.PI;
+    for (let k = 0; k < 12; k++) {
+      const a = k / 12 * Math.PI;
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.lineTo(cx + Math.cos(Math.PI + a) * R, cy + Math.sin(Math.PI + a) * R * 0.55);
@@ -130,8 +322,11 @@ function fallback2d(canvas, variant) {
       const y = cy - Math.sin(d.a) * R * d.r * 0.9 - d.h * R * 0.3;
       ctx.strokeStyle = 'rgba(80,170,255,.22)';
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, cy); ctx.stroke();
-      ctx.fillStyle = 'rgba(0,102,204,.85)';
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = 'rgba(124,198,255,.95)';
+      ctx.fillStyle = '#bfe2ff';
       ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
     });
     if (!REDUCE) raf = requestAnimationFrame(draw);
   }
@@ -139,24 +334,106 @@ function fallback2d(canvas, variant) {
   build();
   window.addEventListener('resize', build);
   draw();
+  return () => { if (raf) cancelAnimationFrame(raf); };
 }
 
-/* ---------- 统一挂载 ---------- */
+/* ============================================================
+   统一挂载：渲染器 / 光照 / 环境 / 天空 / 雾 / 泛光
+   ============================================================ */
 async function mount(canvas, variant, build) {
   if (!canvas) return;
   const stage = canvas.parentElement || canvas;
   const THREE = await loadThree();
   if (!THREE) { fallback2d(canvas, variant); return; }
+
+  let renderer;
   try {
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
-    const ctx = { THREE, scene, camera, renderer, canvas, stage, parallax: makeParallax(stage) };
-    const update = build(ctx);
-    startScene({ THREE, stage, scene, camera, renderer, update });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   } catch (e) {
     fallback2d(canvas, variant);
+    return;
+  }
+
+  try {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    renderer.setPixelRatio(dpr);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.06;
+
+    const scene = new THREE.Scene();
+
+    // 天空 + IBL 环境
+    const skyTex = makeSkyTexture(THREE, variant);
+    scene.background = skyTex;
+    scene.environment = makeEnv(THREE, renderer, skyTex);
+
+    // 指数雾：纵深与空气感
+    scene.fog = new THREE.FogExp2(0x061024, 0.036);
+
+    // 三光源体系
+    const hemi = new THREE.HemisphereLight(0x9ccdff, 0x0a1428, 0.85);
+    scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xbfe0ff, 1.15);
+    key.position.set(4.2, 7.4, 5.2);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x2f86e0, 0.85);
+    rim.position.set(-5.4, -1.6, -4.4);
+    scene.add(rim);
+    const ptA = new THREE.PointLight(0x50aaff, 26, 22, 2.0);
+    ptA.position.set(-3.2, 4.2, 2.6);
+    scene.add(ptA);
+    const ptB = new THREE.PointLight(0x1e64c8, 22, 20, 2.0);
+    ptB.position.set(3.6, -1.4, -3.0);
+    scene.add(ptB);
+
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 240);
+
+    const ctx = {
+      THREE, renderer, scene, camera, canvas, stage,
+      parallax: makeParallax(stage),
+      glow: makeGlowTexture(THREE, renderer),
+      beam: makeBeamTexture(THREE),
+      lights: { hemi, key, rim, ptA, ptB },
+    };
+
+    const update = build(ctx);
+
+    // 泛光后处理（失败则直接渲染）
+    let composer = null;
+    const wantBloom = !REDUCE && window.innerWidth >= 900 && (navigator.hardwareConcurrency || 8) > 3;
+    if (wantBloom) {
+      const mods = await loadBloom();
+      if (mods) {
+        try {
+          const [EC, RP, UB, OP] = mods;
+          const w = stage.clientWidth || 1, h = stage.clientHeight || 1;
+          const c = new EC.EffectComposer(renderer);
+          c.setPixelRatio(Math.min(dpr, 1.5));
+          c.setSize(w, h);
+          c.addPass(new RP.RenderPass(scene, camera));
+          const bloom = new UB.UnrealBloomPass(
+            new THREE.Vector2(w, h),
+            variant === 'graph' ? 0.62 : 0.55,  // strength
+            0.72,                                 // radius
+            0.58                                  // threshold
+          );
+          c.addPass(bloom);
+          c.addPass(new OP.OutputPass());
+          composer = c;
+        } catch (e) {
+          composer = null;
+        }
+      }
+    }
+
+    startScene({ THREE, stage, scene, camera, renderer, update, composer });
+  } catch (e) {
+    try { renderer.dispose(); } catch (_) {}
+    const cv = document.createElement('canvas');
+    cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
+    canvas.replaceWith(cv);
+    fallback2d(cv, variant);
   }
 }
 
@@ -164,102 +441,241 @@ async function mount(canvas, variant, build) {
    1) 首页 Hero —— 低空防御穹顶
    ============================================================ */
 export function heroDome(canvas) {
-  return mount(canvas, 'dome', ({ THREE, scene, camera, stage, parallax }) => {
-    camera.position.set(0, 2.6, 7.4);
-    camera.lookAt(0, 1.15, 0);
+  return mount(canvas, 'dome', ({ THREE, scene, camera, glow, beam, parallax }) => {
+    camera.position.set(0, 2.9, 7.6);
+    camera.lookAt(0, 1.2, 0);
 
     const root = new THREE.Group();
     scene.add(root);
 
+    // ---------- 地面网格 ----------
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(9, 72),
+      new THREE.MeshBasicMaterial({
+        map: makeGridTexture(THREE, 1, 24, false),
+        transparent: true, opacity: 0.30, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.004;
+    root.add(ground);
+
+    // 地面反光晕
+    const floorHalo = new THREE.Mesh(
+      new THREE.CircleGeometry(5.2, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x1e64c8, transparent: true, opacity: 0.14,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      })
+    );
+    floorHalo.rotation.x = -Math.PI / 2;
+    floorHalo.position.y = 0.002;
+    root.add(floorHalo);
+
+    // ---------- 双层穹顶 ----------
     function dome(r, seg, opacity, color, scaleY) {
       const g = new THREE.SphereGeometry(r, seg, Math.round(seg / 2), 0, Math.PI * 2, 0, Math.PI / 2);
-      const m = new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity, depthWrite: false });
+      const m = new THREE.MeshStandardMaterial({
+        color, emissive: color, emissiveIntensity: 1.5,
+        wireframe: true, transparent: true, opacity,
+        metalness: 0.4, roughness: 0.5, depthWrite: false,
+      });
       const mesh = new THREE.Mesh(g, m);
       if (scaleY) mesh.scale.y = scaleY;
       return mesh;
     }
-    const domeA = dome(3.15, 30, 0.15, C.brand);
-    const domeB = dome(2.15, 20, 0.22, C.cyan, 0.92);
+    const domeA = dome(3.2, 34, 0.28, C.brand, 1);
+    const domeB = dome(2.2, 22, 0.42, C.cyan, 0.94);
     root.add(domeA, domeB);
 
-    const grid = new THREE.GridHelper(13, 26, C.light, C.pale);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.42;
-    root.add(grid);
-
-    const rings = [];
-    [1.1, 1.9, 2.7].forEach((r, i) => {
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(r, r + 0.016, 96),
-        new THREE.MeshBasicMaterial({
-          color: i === 0 ? C.cyan : C.brand, transparent: true, opacity: 0.28,
-          side: THREE.DoubleSide, depthWrite: false,
+    // 穹顶骨架环（更强的结构感）
+    const hoops = [];
+    [1.0, 1.9, 2.8].forEach((r, i) => {
+      const h = new THREE.Mesh(
+        new THREE.TorusGeometry(r, 0.006, 5, 96),
+        new THREE.MeshStandardMaterial({
+          color: i === 0 ? C.bright : C.cyan, emissive: i === 0 ? C.bright : C.cyan,
+          emissiveIntensity: 2.4, metalness: 0.3, roughness: 0.4,
         })
       );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.y = 0.004;
-      root.add(ring);
-      rings.push(ring);
+      h.rotation.x = Math.PI / 2;
+      h.position.y = Math.sqrt(Math.max(0, 3.2 * 3.2 - r * r)) * 0.98;
+      root.add(h);
+      hoops.push(h);
     });
 
+    // ---------- 中枢核心 ----------
+    const coreGroup = new THREE.Group();
+    coreGroup.position.y = 0.62;
+    root.add(coreGroup);
+
+    const core = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.2, 1),
+      new THREE.MeshStandardMaterial({
+        color: C.pale, emissive: C.bright, emissiveIntensity: 2.6,
+        metalness: 0.9, roughness: 0.18,
+      })
+    );
+    coreGroup.add(core);
+    coreGroup.add(halo(THREE, glow, C.cyan, 1.35, 0.85));
+
+    const coreRings = [];
+    for (let i = 0; i < 3; i++) {
+      const rg = new THREE.Mesh(
+        new THREE.TorusGeometry(0.34 + i * 0.075, 0.0055, 5, 72),
+        new THREE.MeshStandardMaterial({
+          color: C.cyan, emissive: C.cyan, emissiveIntensity: 2.2,
+          metalness: 0.4, roughness: 0.4, transparent: true, opacity: 0.9,
+        })
+      );
+      rg.rotation.set(Math.PI / 2 + i * 0.5, i * 0.9, i * 0.4);
+      coreGroup.add(rg);
+      coreRings.push(rg);
+    }
+
+    // ---------- 无人机集群（几何体 + 辉光 + 垂光柱） ----------
     const N = 16;
     const drones = [];
+    const beamGeo = new THREE.PlaneGeometry(0.05, 1);
+    beamGeo.translate(0, -0.5, 0);
+    const beamMat = new THREE.MeshBasicMaterial({
+      map: beam, color: C.bright, transparent: true, opacity: 0.5,
+      depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    });
+    const droneGeo = new THREE.OctahedronGeometry(0.055, 0);
+    const droneMat = new THREE.MeshStandardMaterial({
+      color: 0xeaf4ff, emissive: C.bright, emissiveIntensity: 2.4,
+      metalness: 0.7, roughness: 0.25,
+    });
+
+    for (let i = 0; i < N; i++) {
+      const grp = new THREE.Group();
+      const mesh = new THREE.Mesh(droneGeo, droneMat);
+      mesh.rotation.set(0.4, i * 0.7, 0.2);
+      const h = halo(THREE, glow, C.cyan, 0.34, 0.9);
+      const bm = new THREE.Mesh(beamGeo, beamMat);
+      grp.add(mesh, h, bm);
+      grp.userData = {
+        a: (i / N) * Math.PI * 2 + Math.random() * 0.4,
+        rad: 1.45 + Math.random() * 1.7,
+        hgt: 0.5 + Math.random() * 2.15,
+        sp: (0.12 + Math.random() * 0.22) * (Math.random() < 0.5 ? -1 : 1),
+        mesh, bm, baseH: 0,
+      };
+      root.add(grp);
+      drones.push(grp);
+    }
+
+    // 轨迹连线
     const linePos = new Float32Array(N * 6);
     const lineGeo = new THREE.BufferGeometry();
     lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
     const lines = new THREE.LineSegments(
       lineGeo,
-      new THREE.LineBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.22 })
+      new THREE.LineBasicMaterial({
+        color: C.cyan, transparent: true, opacity: 0.22,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      })
     );
     root.add(lines);
 
-    const droneGeo = new THREE.SphereGeometry(0.045, 8, 8);
-    for (let i = 0; i < N; i++) {
-      const m = new THREE.Mesh(droneGeo, new THREE.MeshBasicMaterial({ color: C.blue }));
-      m.userData = {
-        a: Math.random() * Math.PI * 2,
-        rad: 1.5 + Math.random() * 1.6,
-        h: 0.5 + Math.random() * 2.1,
-        sp: (0.12 + Math.random() * 0.22) * (Math.random() < 0.5 ? -1 : 1),
-      };
-      root.add(m);
-      drones.push(m);
-    }
+    // ---------- 三区同心环 ----------
+    const rings = [];
+    [[1.1, C.bright, 0.55], [1.9, C.cyan, 0.42], [2.7, C.brand, 0.3]].forEach(([r, color, op]) => {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(r, r + 0.018, 128),
+        new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: op,
+          side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+        })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.006;
+      root.add(ring);
+      rings.push(ring);
+    });
 
+    // ---------- 垂直扫描环 ----------
     const scan = new THREE.Mesh(
-      new THREE.TorusGeometry(3.2, 0.008, 6, 90),
-      new THREE.MeshBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.5, depthWrite: false })
+      new THREE.TorusGeometry(3.2, 0.0075, 6, 110),
+      new THREE.MeshStandardMaterial({
+        color: C.bright, emissive: C.bright, emissiveIntensity: 3,
+        metalness: 0, roughness: 1, transparent: true, opacity: 0.9,
+      })
     );
     scan.rotation.x = Math.PI / 2;
     root.add(scan);
 
+    // ---------- 星尘 ----------
+    const P = 260;
+    const ppos = new Float32Array(P * 3);
+    for (let i = 0; i < P; i++) {
+      const r = 3.4 + Math.random() * 4.6;
+      const th = Math.random() * Math.PI * 2;
+      ppos[i * 3] = Math.cos(th) * r;
+      ppos[i * 3 + 1] = Math.random() * 3.4 - 1.6;
+      ppos[i * 3 + 2] = Math.sin(th) * r;
+    }
+    const pgeo = new THREE.BufferGeometry();
+    pgeo.setAttribute('position', new THREE.BufferAttribute(ppos, 3));
+    const dust = new THREE.Points(pgeo, new THREE.PointsMaterial({
+      map: glow, color: C.light, size: 0.14, transparent: true, opacity: 0.55,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    }));
+    root.add(dust);
+
     return (t) => {
       const p = parallax.step();
-      root.rotation.y = t * 0.09 + p.x * 0.28;
-      root.rotation.x = -p.y * 0.16;
-      domeB.rotation.y = -t * 0.22;
-      domeA.rotation.y = t * 0.06;
+      root.rotation.y = t * 0.075 + p.x * 0.3;
+      root.rotation.x = -p.y * 0.14;
+      domeB.rotation.y = -t * 0.2;
+      domeA.rotation.y = t * 0.055;
+      domeA.material.opacity = 0.24 + 0.09 * (0.5 + 0.5 * Math.sin(t * 0.7));
 
+      // 核心脉动
+      core.rotation.y = t * 0.8;
+      core.rotation.x = t * 0.42;
+      const cp = 1 + Math.sin(t * 2.1) * 0.09;
+      core.scale.setScalar(cp);
+      coreRings.forEach((r, i) => {
+        r.rotation.z = t * (0.5 + i * 0.28) * (i % 2 ? -1 : 1);
+        r.rotation.y = t * (0.3 + i * 0.16);
+      });
+
+      // 无人机
       const pos = lineGeo.attributes.position.array;
       for (let i = 0; i < N; i++) {
         const d = drones[i], u = d.userData;
         u.a += 0.006 * u.sp;
         const x = Math.cos(u.a) * u.rad;
         const z = Math.sin(u.a) * u.rad;
-        const y = u.h + Math.sin(t * 0.9 + i) * 0.08;
+        const y = u.hgt + Math.sin(t * 0.9 + i) * 0.085;
         d.position.set(x, y, z);
-        d.scale.setScalar(0.85 + Math.sin(t * 2.4 + i) * 0.15);
+        u.mesh.rotation.y += 0.02;
+        // 垂光柱长度随高度
+        u.bm.scale.y = y;
+        u.bm.position.y = 0;
         pos[i * 6] = x; pos[i * 6 + 1] = y; pos[i * 6 + 2] = z;
         pos[i * 6 + 3] = x; pos[i * 6 + 4] = 0; pos[i * 6 + 5] = z;
       }
       lineGeo.attributes.position.needsUpdate = true;
 
+      // 扫描环上下巡游
       const k = Math.sin(t * 0.5) * 0.5 + 0.5;
-      scan.position.y = 0.1 + k * 2.6;
-      scan.material.opacity = 0.5 * (1 - Math.abs(k - 0.5) * 1.2);
+      scan.position.y = 0.08 + k * 2.75;
+      const sc = 0.5 + 0.5 * Math.sin(t * 0.5);
+      scan.scale.setScalar(0.32 + sc * 0.68);
+      scan.material.opacity = 0.85 * (1 - Math.abs(k - 0.5) * 1.15);
+
       rings.forEach((r, i) => {
-        r.material.opacity = 0.16 + 0.16 * (0.5 + 0.5 * Math.sin(t * 1.1 - i * 1.2));
+        r.material.opacity = (0.24 + 0.34 * (0.5 + 0.5 * Math.sin(t * 1.1 - i * 1.2)));
       });
+      hoops.forEach((h, i) => {
+        h.material.emissiveIntensity = 1.8 + 1.4 * (0.5 + 0.5 * Math.sin(t * 1.4 - i * 0.9));
+      });
+
+      dust.rotation.y = -t * 0.03;
     };
   });
 }
@@ -268,97 +684,192 @@ export function heroDome(canvas) {
    2) DX —— 三维电子沙盘
    ============================================================ */
 export function productSandbox(canvas) {
-  return mount(canvas, 'dome', ({ THREE, scene, camera, stage, parallax }) => {
-    camera.position.set(0, 3.7, 6.4);
-    camera.lookAt(0, 0.5, 0);
+  return mount(canvas, 'sandbox', ({ THREE, scene, camera, glow, parallax }) => {
+    camera.position.set(0, 3.9, 6.6);
+    camera.lookAt(0, 0.55, 0);
 
     const root = new THREE.Group();
     scene.add(root);
 
-    // 线框地形
-    const geo = new THREE.PlaneGeometry(9, 9, 46, 46);
+    // ---------- 线框地形（起伏 + 实体底座） ----------
+    const geo = new THREE.PlaneGeometry(9, 9, 52, 52);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
       const d = Math.sqrt(x * x + z * z);
-      let y = Math.sin(x * 0.9) * 0.16 + Math.cos(z * 1.1) * 0.14 + Math.sin((x + z) * 0.6) * 0.1;
-      y *= Math.max(0, 1 - d / 5.4);
+      let y = Math.sin(x * 0.9) * 0.17 + Math.cos(z * 1.1) * 0.15 + Math.sin((x + z) * 0.6) * 0.1;
+      y *= Math.max(0, 1 - d / 5.5);
       pos.setY(i, y);
     }
     geo.computeVertexNormals();
-    const terrain = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      color: C.brand, wireframe: true, transparent: true, opacity: 0.30, depthWrite: false,
-    }));
-    root.add(terrain);
 
-    // 三区三防同心环
+    const terrainSolid = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: 0x0b1c34, emissive: 0x0a1c38, emissiveIntensity: 0.5,
+      metalness: 0.85, roughness: 0.42,
+    }));
+    root.add(terrainSolid);
+    const terrainWire = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: C.brand, emissive: C.cyan, emissiveIntensity: 1.1,
+      wireframe: true, transparent: true, opacity: 0.42,
+      metalness: 0.3, roughness: 0.5, depthWrite: false,
+    }));
+    terrainWire.position.y = 0.004;
+    root.add(terrainWire);
+
+    // ---------- 三区（同心环）+ 防区围栏 ----------
     const rings = [];
-    [[1.2, C.cyan, 0.30], [2.0, C.brand, 0.24], [2.8, C.light, 0.18]].forEach(([r, color, op]) => {
+    [[1.2, C.bright, 0.62], [2.0, C.cyan, 0.5], [2.8, C.brand, 0.36]].forEach(([r, color, op], i) => {
       const ring = new THREE.Mesh(
-        new THREE.RingGeometry(r, r + 0.02, 96),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })
+        new THREE.RingGeometry(r, r + 0.022, 128),
+        new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: op, side: THREE.DoubleSide,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+        })
       );
       ring.rotation.x = -Math.PI / 2;
-      ring.position.y = 0.02;
+      ring.position.y = 0.012;
       root.add(ring);
       rings.push(ring);
+
+      // 竖向光栅围栏
+      const fence = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r, 0.34, 96, 1, true),
+        new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.1 + i * 0.015, side: THREE.DoubleSide,
+          depthWrite: false, blending: THREE.AdditiveBlending,
+          map: makeGridTexture(THREE, 1, 48, false),
+        })
+      );
+      fence.position.y = 0.17;
+      root.add(fence);
     });
 
-    // 航线
+    // ---------- 航线（管状发光） ----------
     const pts = [];
-    for (let i = 0; i <= 8; i++) {
-      const a = i / 8 * Math.PI * 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * 2.6, 1.15 + Math.sin(a * 3) * 0.24, Math.sin(a) * 2.6));
+    for (let i = 0; i <= 10; i++) {
+      const a = i / 10 * Math.PI * 2;
+      pts.push(new THREE.Vector3(
+        Math.cos(a) * 2.62,
+        1.2 + Math.sin(a * 3) * 0.28,
+        Math.sin(a) * 2.62
+      ));
     }
     const curve = new THREE.CatmullRomCurve3(pts, true);
-    const routeGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(180));
-    root.add(new THREE.Line(routeGeo, new THREE.LineBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.55 })));
-
-    // 飞行器标记 + 垂线
-    const craft = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.1, 0),
-      new THREE.MeshBasicMaterial({ color: C.cyan })
+    const route = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 260, 0.008, 6, true),
+      new THREE.MeshStandardMaterial({
+        color: C.bright, emissive: C.bright, emissiveIntensity: 2.6,
+        metalness: 0.2, roughness: 0.4, transparent: true, opacity: 0.95,
+      })
     );
+    root.add(route);
+
+    // ---------- 飞行器 ----------
+    const craft = new THREE.Group();
+    const craftBody = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.11, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0xf0f8ff, emissive: C.bright, emissiveIntensity: 2.8,
+        metalness: 0.85, roughness: 0.2,
+      })
+    );
+    craft.add(craftBody, halo(THREE, glow, C.bright, 0.72, 0.95));
     root.add(craft);
+
+    // 垂线
     const dropPos = new Float32Array(6);
     const dropGeo = new THREE.BufferGeometry();
     dropGeo.setAttribute('position', new THREE.BufferAttribute(dropPos, 3));
-    root.add(new THREE.LineSegments(dropGeo, new THREE.LineBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.3 })));
+    root.add(new THREE.LineSegments(dropGeo, new THREE.LineBasicMaterial({
+      color: C.bright, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false,
+    })));
 
-    // 扫描立面
+    // 航迹拖尾粒子
+    const TRAIL = 40;
+    const trailPos = new Float32Array(TRAIL * 3);
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+    const trail = new THREE.Points(trailGeo, new THREE.PointsMaterial({
+      map: glow, color: C.bright, size: 0.2, transparent: true, opacity: 0.85,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    }));
+    root.add(trail);
+
+    // ---------- 扫描立面 ----------
     const scan = new THREE.Mesh(
-      new THREE.PlaneGeometry(9, 2.4),
+      new THREE.PlaneGeometry(9, 2.6),
       new THREE.MeshBasicMaterial({
-        color: C.cyan, transparent: true, opacity: 0.09, side: THREE.DoubleSide,
+        color: C.bright, transparent: true, opacity: 0.12, side: THREE.DoubleSide,
         depthWrite: false, blending: THREE.AdditiveBlending,
+        map: makeGridTexture(THREE, 1, 30, false),
       })
     );
     scan.rotation.y = Math.PI / 2;
-    scan.position.y = 1.2;
+    scan.position.y = 1.3;
     root.add(scan);
+
+    // ---------- 目标灯塔（光柱） ----------
+    const beacons = [];
+    [[2.6, 0.6], [-2.4, 2.1], [-1.1, -2.7]].forEach(([x, z]) => {
+      const g = new THREE.Group();
+      const pillar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.014, 0.014, 1.5, 6, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: C.bright, transparent: true, opacity: 0.34,
+          depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        })
+      );
+      pillar.position.y = 0.75;
+      const hd = halo(THREE, glow, C.cyan, 0.42, 0.85);
+      hd.position.y = 1.5;
+      g.add(pillar, hd);
+      g.position.set(x, 0, z);
+      root.add(g);
+      beacons.push({ g, hd, phase: Math.random() * 6.28 });
+    });
+
+    const trailHistory = [];
 
     return (t) => {
       const m = parallax.step();
-      root.rotation.y = t * 0.075 + m.x * 0.3;
+      root.rotation.y = t * 0.07 + m.x * 0.32;
       root.rotation.x = -m.y * 0.12;
 
-      const u = (t * 0.11) % 1;
+      const u = (t * 0.085) % 1;
       const p = curve.getPointAt(u);
       craft.position.copy(p);
-      craft.rotation.y = t * 1.6;
-      craft.rotation.x = t * 0.9;
+      craft.rotation.y = t * 1.5;
+      craft.rotation.x = t * 0.85;
 
       dropPos[0] = p.x; dropPos[1] = p.y; dropPos[2] = p.z;
       dropPos[3] = p.x; dropPos[4] = 0; dropPos[5] = p.z;
       dropGeo.attributes.position.needsUpdate = true;
 
+      // 拖尾
+      trailHistory.unshift(p.x, p.y, p.z);
+      if (trailHistory.length > TRAIL * 3) trailHistory.length = TRAIL * 3;
+      for (let i = 0; i < TRAIL; i++) {
+        const k = i * 3;
+        trailPos[k] = trailHistory[k] || p.x;
+        trailPos[k + 1] = trailHistory[k + 1] || p.y;
+        trailPos[k + 2] = trailHistory[k + 2] || p.z;
+      }
+      trailGeo.attributes.position.needsUpdate = true;
+      trail.material.opacity = 0.5;
+
       const s = Math.sin(t * 0.42);
-      scan.position.x = s * 4.4;
-      scan.material.opacity = 0.11 * (1 - Math.abs(s) * 0.6);
+      scan.position.x = s * 4.5;
+      scan.material.opacity = 0.16 * (1 - Math.abs(s) * 0.55);
 
       rings.forEach((r, i) => {
-        r.material.opacity = 0.12 + 0.20 * (0.5 + 0.5 * Math.sin(t * 0.9 - i * 1.3));
+        r.material.opacity = 0.2 + 0.36 * (0.5 + 0.5 * Math.sin(t * 0.9 - i * 1.3));
+      });
+      terrainWire.material.opacity = 0.36 + 0.1 * (0.5 + 0.5 * Math.sin(t * 0.6));
+      beacons.forEach((b, i) => {
+        const k = 0.6 + 0.4 * Math.sin(t * 1.6 + b.phase);
+        b.hd.material.opacity = 0.5 + 0.45 * k;
+        b.hd.scale.setScalar(0.36 + 0.16 * k);
       });
     };
   });
@@ -368,58 +879,125 @@ export function productSandbox(canvas) {
    3) RX —— 多智能体协同网络
    ============================================================ */
 export function productAgents(canvas) {
-  return mount(canvas, 'network', ({ THREE, scene, camera, stage, parallax }) => {
-    camera.position.set(0, 1.6, 7.0);
+  return mount(canvas, 'network', ({ THREE, scene, camera, glow, parallax }) => {
+    camera.position.set(0, 1.5, 7.2);
     camera.lookAt(0, 0, 0);
 
     const root = new THREE.Group();
     scene.add(root);
 
+    // ---------- 极坐标地面网格 ----------
+    const polar = new THREE.Mesh(
+      new THREE.CircleGeometry(4.6, 96),
+      new THREE.MeshBasicMaterial({
+        map: makeGridTexture(THREE, 1, 28, false),
+        transparent: true, opacity: 0.2, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    polar.rotation.x = -Math.PI / 2;
+    polar.position.y = -1.55;
+    root.add(polar);
+
+    // ---------- 节点群 ----------
     const groups = [
-      { color: C.cyan, size: 0.078, n: 8 },   // 空中
-      { color: C.blue, size: 0.098, n: 8 },   // 地面
-      { color: C.pale, size: 0.062, n: 6 },   // 穿戴
+      { color: C.bright, size: 0.082, n: 8, y: 0.55 },   // 空中
+      { color: C.brand, size: 0.104, n: 8, y: -0.25 },   // 地面
+      { color: C.pale, size: 0.064, n: 6, y: 0 },        // 穿戴
     ];
     const nodes = [];
-    const nodeGeoCache = {};
+    const meshCache = {};
 
     groups.forEach((g, gi) => {
       const key = g.size.toFixed(3);
-      if (!nodeGeoCache[key]) nodeGeoCache[key] = new THREE.SphereGeometry(g.size, 10, 10);
+      if (!meshCache[key]) {
+        meshCache[key] = {
+          geo: new THREE.DodecahedronGeometry(g.size, 0),
+          mat: new THREE.MeshStandardMaterial({
+            color: g.color, emissive: g.color, emissiveIntensity: 1.7,
+            metalness: 0.8, roughness: 0.24,
+          }),
+        };
+      }
       for (let i = 0; i < g.n; i++) {
         const r = 1.0 + Math.random() * 2.0;
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(2 * Math.random() - 1);
         const base = new THREE.Vector3(
           r * Math.sin(phi) * Math.cos(theta),
-          r * Math.cos(phi) * 0.62 + (gi === 0 ? 0.5 : gi === 1 ? -0.25 : 0),
+          r * Math.cos(phi) * 0.6 + g.y,
           r * Math.sin(phi) * Math.sin(theta)
         );
-        const mesh = new THREE.Mesh(nodeGeoCache[key], new THREE.MeshBasicMaterial({ color: g.color }));
+        const mesh = new THREE.Mesh(meshCache[key].geo, meshCache[key].mat);
         mesh.position.copy(base);
+        mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+        const hd = halo(THREE, glow, g.color, g.size * 7.5, 0.6);
+        mesh.add(hd);
         root.add(mesh);
-        nodes.push({ mesh, base, phase: Math.random() * Math.PI * 2, sp: 0.14 + Math.random() * 0.2 });
+        nodes.push({
+          mesh, hd, base,
+          phase: Math.random() * Math.PI * 2,
+          sp: 0.14 + Math.random() * 0.2,
+          rs: (Math.random() - 0.5) * 0.6,
+        });
       }
     });
 
-    // 动态连线
-    const MAXL = 130;
+    // ---------- 邻接连线 ----------
+    const MAXL = 150;
     const linkPos = new Float32Array(MAXL * 6);
     const linkGeo = new THREE.BufferGeometry();
     linkGeo.setAttribute('position', new THREE.BufferAttribute(linkPos, 3));
-    const links = new THREE.LineSegments(
-      linkGeo,
-      new THREE.LineBasicMaterial({ color: C.brand, transparent: true, opacity: 0.26 })
-    );
+    const links = new THREE.LineSegments(linkGeo, new THREE.LineBasicMaterial({
+      color: C.cyan, transparent: true, opacity: 0.34,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
     root.add(links);
 
-    // 脉冲信号
+    // ---------- 中枢 ----------
+    const hubGroup = new THREE.Group();
+    root.add(hubGroup);
+    const hub = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.3, 1),
+      new THREE.MeshStandardMaterial({
+        color: C.pale, emissive: C.cyan, emissiveIntensity: 2.2,
+        wireframe: true, transparent: true, opacity: 0.85, metalness: 0.5, roughness: 0.4,
+      })
+    );
+    const hubCore = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 20, 20),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff, emissive: C.bright, emissiveIntensity: 3.4, metalness: 0.9, roughness: 0.15,
+      })
+    );
+    hubGroup.add(hub, hubCore, halo(THREE, glow, C.cyan, 1.5, 0.9));
+    const hubRings = [];
+    for (let i = 0; i < 2; i++) {
+      const r = new THREE.Mesh(
+        new THREE.TorusGeometry(0.44 + i * 0.12, 0.006, 5, 76),
+        new THREE.MeshStandardMaterial({
+          color: C.cyan, emissive: C.cyan, emissiveIntensity: 2.4,
+          metalness: 0.3, roughness: 0.4, transparent: true, opacity: 0.85,
+        })
+      );
+      r.rotation.set(Math.PI / 2 + i * 0.6, i * 0.8, 0);
+      hubGroup.add(r);
+      hubRings.push(r);
+    }
+
+    // ---------- 脉冲信号 ----------
     const pulses = [];
-    const pulseGeo = new THREE.SphereGeometry(0.035, 8, 8);
-    for (let i = 0; i < 7; i++) {
-      const mesh = new THREE.Mesh(pulseGeo, new THREE.MeshBasicMaterial({ color: C.cyan }));
-      root.add(mesh);
-      pulses.push({ mesh, a: 0, b: 1, t: Math.random(), sp: 0.5 + Math.random() * 0.7 });
+    for (let i = 0; i < 9; i++) {
+      const grp = new THREE.Group();
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.038, 10, 10),
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff, emissive: C.bright, emissiveIntensity: 3.2, metalness: 0.4, roughness: 0.3,
+        })
+      );
+      grp.add(dot, halo(THREE, glow, C.cyan, 0.5, 0.9));
+      root.add(grp);
+      pulses.push({ grp, dot, a: 0, b: 1, t: Math.random(), sp: 0.42 + Math.random() * 0.7 });
     }
     function repick(pu) {
       pu.a = Math.floor(Math.random() * nodes.length);
@@ -427,25 +1005,47 @@ export function productAgents(canvas) {
       if (pu.b === pu.a) pu.b = (pu.a + 1) % nodes.length;
     }
 
+    // ---------- 星尘 ----------
+    const P = 200;
+    const ppos = new Float32Array(P * 3);
+    for (let i = 0; i < P; i++) {
+      const r = 3.2 + Math.random() * 3.6;
+      const th = Math.random() * Math.PI * 2;
+      const ph = Math.acos(2 * Math.random() - 1);
+      ppos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+      ppos[i * 3 + 1] = r * Math.cos(ph) * 0.7;
+      ppos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+    }
+    const pgeo = new THREE.BufferGeometry();
+    pgeo.setAttribute('position', new THREE.BufferAttribute(ppos, 3));
+    const dust = new THREE.Points(pgeo, new THREE.PointsMaterial({
+      map: glow, color: C.light, size: 0.13, transparent: true, opacity: 0.5,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    }));
+    root.add(dust);
+
     const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 
     return (t) => {
       const pa = parallax.step();
-      root.rotation.y = t * 0.085 + pa.x * 0.35;
-      root.rotation.x = -pa.y * 0.18;
+      root.rotation.y = t * 0.08 + pa.x * 0.36;
+      root.rotation.x = -pa.y * 0.17;
 
-      // 节点缓慢漂移
+      // 节点漂移 + 自转
       nodes.forEach((n) => {
         n.mesh.position.set(
           n.base.x + Math.sin(t * n.sp + n.phase) * 0.09,
           n.base.y + Math.cos(t * n.sp * 1.2 + n.phase) * 0.08,
           n.base.z + Math.cos(t * n.sp + n.phase * 1.4) * 0.09
         );
+        n.mesh.rotation.x += 0.004 * n.rs;
+        n.mesh.rotation.y += 0.006 * n.rs;
+        n.hd.material.opacity = 0.42 + 0.28 * (0.5 + 0.5 * Math.sin(t * 2 + n.phase));
       });
 
       // 邻接连线
       let c = 0;
-      const TH = 1.42;
+      const TH = 1.46;
       for (let i = 0; i < nodes.length && c < MAXL; i++) {
         for (let j = i + 1; j < nodes.length && c < MAXL; j++) {
           tmpA.copy(nodes[i].mesh.position);
@@ -459,6 +1059,16 @@ export function productAgents(canvas) {
       }
       linkGeo.setDrawRange(0, c * 2);
       linkGeo.attributes.position.needsUpdate = true;
+      links.material.opacity = 0.26 + 0.12 * (0.5 + 0.5 * Math.sin(t * 1.3));
+
+      // 中枢
+      hub.rotation.y = t * 0.42;
+      hub.rotation.x = t * 0.24;
+      hub.scale.setScalar(1 + Math.sin(t * 1.5) * 0.06);
+      hubCore.scale.setScalar(1 + Math.sin(t * 2.4) * 0.14);
+      hubRings.forEach((r, i) => {
+        r.rotation.z = t * (0.6 + i * 0.5) * (i % 2 ? -1 : 1);
+      });
 
       // 脉冲
       pulses.forEach((pu) => {
@@ -466,9 +1076,13 @@ export function productAgents(canvas) {
         if (pu.t >= 1) { pu.t = 0; repick(pu); }
         tmpA.copy(nodes[pu.a].mesh.position);
         tmpB.copy(nodes[pu.b].mesh.position);
-        pu.mesh.position.lerpVectors(tmpA, tmpB, pu.t);
-        pu.mesh.scale.setScalar(0.7 + Math.sin(pu.t * Math.PI) * 0.9);
+        pu.grp.position.lerpVectors(tmpA, tmpB, pu.t);
+        const k = Math.sin(pu.t * Math.PI);
+        pu.grp.scale.setScalar(0.65 + k * 1.0);
+        pu.dot.material.emissiveIntensity = 2 + k * 2.4;
       });
+
+      dust.rotation.y = -t * 0.026;
     };
   });
 }
@@ -477,103 +1091,180 @@ export function productAgents(canvas) {
    4) EX —— 知识图谱星云
    ============================================================ */
 export function productGraph(canvas) {
-  return mount(canvas, 'graph', ({ THREE, scene, camera, stage, parallax }) => {
-    camera.position.set(0, 1.1, 7.6);
+  return mount(canvas, 'graph', ({ THREE, scene, camera, glow, parallax }) => {
+    camera.position.set(0, 1.05, 7.8);
     camera.lookAt(0, 0, 0);
 
     const root = new THREE.Group();
     scene.add(root);
 
-    // 粒子星云
-    const P = 420;
+    // ---------- 星云粒子（顶点着色） ----------
+    const P = 460;
     const ppos = new Float32Array(P * 3);
+    const pcol = new Float32Array(P * 3);
+    const cA = new THREE.Color(C.cyan), cB = new THREE.Color(C.brand), cC = new THREE.Color(C.pale);
     for (let i = 0; i < P; i++) {
-      const r = 1.6 + Math.random() * 3.4;
+      const r = 1.5 + Math.random() * 3.6;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       ppos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      ppos[i * 3 + 1] = r * Math.cos(phi) * 0.65;
+      ppos[i * 3 + 1] = r * Math.cos(phi) * 0.66;
       ppos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+      const col = Math.random() < 0.34 ? cA : (Math.random() < 0.5 ? cB : cC);
+      pcol[i * 3] = col.r; pcol[i * 3 + 1] = col.g; pcol[i * 3 + 2] = col.b;
     }
     const pgeo = new THREE.BufferGeometry();
     pgeo.setAttribute('position', new THREE.BufferAttribute(ppos, 3));
+    pgeo.setAttribute('color', new THREE.BufferAttribute(pcol, 3));
     const stars = new THREE.Points(pgeo, new THREE.PointsMaterial({
-      color: C.light, size: 0.032, transparent: true, opacity: 0.5, depthWrite: false,
+      map: glow, size: 0.15, vertexColors: true, transparent: true, opacity: 0.62,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
     }));
     root.add(stars);
 
-    // 中枢节点
+    // ---------- 中枢 ----------
+    const hubGroup = new THREE.Group();
+    root.add(hubGroup);
     const hub = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.26, 2),
-      new THREE.MeshBasicMaterial({ color: C.blue, wireframe: true, transparent: true, opacity: 0.8 })
+      new THREE.IcosahedronGeometry(0.28, 2),
+      new THREE.MeshStandardMaterial({
+        color: C.pale, emissive: C.cyan, emissiveIntensity: 2.1,
+        wireframe: true, transparent: true, opacity: 0.8, metalness: 0.6, roughness: 0.34,
+      })
     );
     const hubCore = new THREE.Mesh(
-      new THREE.SphereGeometry(0.13, 16, 16),
-      new THREE.MeshBasicMaterial({ color: C.cyan })
+      new THREE.IcosahedronGeometry(0.13, 2),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff, emissive: C.bright, emissiveIntensity: 3.6, metalness: 1, roughness: 0.14,
+      })
     );
-    root.add(hub, hubCore);
+    hubGroup.add(hub, hubCore, halo(THREE, glow, C.cyan, 1.7, 0.9));
+    const hubRings = [];
+    for (let i = 0; i < 3; i++) {
+      const r = new THREE.Mesh(
+        new THREE.TorusGeometry(0.42 + i * 0.14, 0.0058, 5, 80),
+        new THREE.MeshStandardMaterial({
+          color: i === 0 ? C.bright : C.cyan, emissive: i === 0 ? C.bright : C.cyan,
+          emissiveIntensity: 2.4, metalness: 0.3, roughness: 0.4,
+          transparent: true, opacity: 0.8,
+        })
+      );
+      r.rotation.set(Math.PI / 2 + i * 0.55, i * 0.9, i * 0.3);
+      hubGroup.add(r);
+      hubRings.push(r);
+    }
 
-    // 六个维度簇
+    // ---------- 六维簇 ----------
     const clusters = [];
     const edgePts = [];
     const CLUSTER_N = 6;
+    const clusterColors = [C.cyan, C.bright, C.brand, C.light, C.cyan, C.brand];
+
     for (let c = 0; c < CLUSTER_N; c++) {
-      const y = 1.05 - (c / (CLUSTER_N - 1)) * 2.1;
+      const y = 1.1 - (c / (CLUSTER_N - 1)) * 2.2;
       const theta = c * 1.9;
-      const rad = 2.15;
+      const rad = 2.2;
       const center = new THREE.Vector3(Math.cos(theta) * rad, y, Math.sin(theta) * rad);
-      const color = [C.cyan, C.blue, C.brand, C.light][c % 4];
+      const color = clusterColors[c];
 
+      const grp = new THREE.Group();
+      grp.position.copy(center);
       const cMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.085, 12, 12),
-        new THREE.MeshBasicMaterial({ color })
+        new THREE.IcosahedronGeometry(0.095, 1),
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff, emissive: color, emissiveIntensity: 2.4,
+          metalness: 0.85, roughness: 0.2,
+        })
       );
-      cMesh.position.copy(center);
-      root.add(cMesh);
+      grp.add(cMesh, halo(THREE, glow, color, 0.62, 0.8));
+      root.add(grp);
 
+      // 主边
       edgePts.push(0, 0, 0, center.x, center.y, center.z);
 
       // 叶子节点
+      const leaves = [];
       for (let k = 0; k < 4; k++) {
         const lr = 0.5 + Math.random() * 0.55;
         const lt = Math.random() * Math.PI * 2;
         const lp = Math.acos(2 * Math.random() - 1);
         const leaf = new THREE.Vector3(
           center.x + lr * Math.sin(lp) * Math.cos(lt),
-          center.y + lr * Math.cos(lp) * 0.8,
+          center.y + lr * Math.cos(lp) * 0.82,
           center.z + lr * Math.sin(lp) * Math.sin(lt)
         );
         const lm = new THREE.Mesh(
-          new THREE.SphereGeometry(0.038, 8, 8),
-          new THREE.MeshBasicMaterial({ color: C.pale })
+          new THREE.SphereGeometry(0.036, 10, 10),
+          new THREE.MeshStandardMaterial({
+            color: C.pale, emissive: C.pale, emissiveIntensity: 1.6, metalness: 0.7, roughness: 0.3,
+          })
         );
         lm.position.copy(leaf);
         root.add(lm);
+        leaves.push(lm);
         edgePts.push(center.x, center.y, center.z, leaf.x, leaf.y, leaf.z);
       }
-      clusters.push({ center, cMesh });
+      clusters.push({ center, cMesh, grp, leaves, phase: Math.random() * 6.28 });
     }
 
     const egeo = new THREE.BufferGeometry();
     egeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(edgePts), 3));
     root.add(new THREE.LineSegments(egeo, new THREE.LineBasicMaterial({
-      color: C.brand, transparent: true, opacity: 0.30,
+      color: C.cyan, transparent: true, opacity: 0.34,
+      blending: THREE.AdditiveBlending, depthWrite: false,
     })));
+
+    // ---------- 关系流动（沿主边运动的能量点） ----------
+    const flows = [];
+    for (let i = 0; i < CLUSTER_N; i++) {
+      const grp = new THREE.Group();
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.034, 10, 10),
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff, emissive: C.bright, emissiveIntensity: 3.2, metalness: 0.5, roughness: 0.3,
+        })
+      );
+      grp.add(dot, halo(THREE, glow, C.cyan, 0.42, 0.9));
+      root.add(grp);
+      flows.push({ grp, dot, t: Math.random(), sp: 0.35 + Math.random() * 0.4, target: i });
+    }
 
     return (t) => {
       const pa = parallax.step();
-      root.rotation.y = t * 0.1 + pa.x * 0.32;
-      root.rotation.x = -pa.y * 0.16;
+      root.rotation.y = t * 0.095 + pa.x * 0.32;
+      root.rotation.x = -pa.y * 0.15;
 
-      stars.rotation.y = -t * 0.02;
-      hub.rotation.y = t * 0.5;
-      hub.rotation.x = t * 0.28;
-      hub.scale.setScalar(1 + Math.sin(t * 1.6) * 0.06);
-      hubCore.scale.setScalar(1 + Math.sin(t * 2.2) * 0.12);
+      stars.rotation.y = -t * 0.022;
+      stars.material.opacity = 0.5 + 0.16 * (0.5 + 0.5 * Math.sin(t * 0.6));
+
+      hub.rotation.y = t * 0.46;
+      hub.rotation.x = t * 0.26;
+      hub.scale.setScalar(1 + Math.sin(t * 1.55) * 0.055);
+      hubCore.rotation.y = -t * 0.7;
+      hubCore.rotation.z = t * 0.4;
+      hubCore.scale.setScalar(1 + Math.sin(t * 2.3) * 0.13);
+      hubRings.forEach((r, i) => {
+        r.rotation.z = t * (0.55 + i * 0.34) * (i % 2 ? -1 : 1);
+        r.material.emissiveIntensity = 1.8 + 1.2 * (0.5 + 0.5 * Math.sin(t * 1.7 - i));
+      });
 
       clusters.forEach((cl, i) => {
-        const k = 1 + Math.sin(t * 1.2 + i) * 0.09;
+        const k = 1 + Math.sin(t * 1.2 + cl.phase) * 0.1;
         cl.cMesh.scale.setScalar(k);
+        cl.cMesh.rotation.y = t * 0.5;
+        cl.cMesh.rotation.x = t * 0.3;
+      });
+
+      // 能量流动
+      flows.forEach((f) => {
+        f.t += 0.006 * f.sp;
+        if (f.t >= 1) { f.t = 0; f.target = Math.floor(Math.random() * CLUSTER_N); }
+        const c = clusters[f.target].center;
+        const k = f.t;
+        f.grp.position.set(c.x * k, c.y * k, c.z * k);
+        const s = Math.sin(k * Math.PI);
+        f.grp.scale.setScalar(0.6 + s * 0.9);
+        f.dot.material.emissiveIntensity = 2 + s * 2.6;
       });
     };
   });
