@@ -1,0 +1,18 @@
+{
+  "name": "zhongdun-tech-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "北京中盾数智科技有限公司 · 领御系列产品官网",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.160.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

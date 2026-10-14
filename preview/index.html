@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中盾数智 · 领御低空 | 低空安全与公共安全智能体（设计预览）</title>
+<meta name="description" content="北京中盾数智科技有限公司——低空安全产品方案 · 公共安全行业大模型。">
+<style>
+/* ============================================================
+   设计系统 —— 对齐参考站（Apple 风浅色）
+   ============================================================ */
+:root{
+  --blue:#0066cc; --blue-focus:#0071e3; --blue-dark:#142848; --blue-deep:#1e64c8;
+  --ink:#1d1d1f; --ink-80:#333; --ink-60:#4d4d50; --ink-48:#7a7a7a; --ink-32:#a1a1a6;
+  --canvas:#fff; --parchment:#f5f5f7; --pearl:#fafafc;
+  --hairline:#e0e0e0; --divider:#f0f0f0;
+  --on-dark:#fff; --body-on-dark:#d2d2d7;
+  --r-xs:5px; --r-sm:8px; --r-md:11px; --r-lg:18px; --r-xl:28px; --r-pill:9999px;
+  --sp-xs:8px; --sp-sm:12px; --sp-md:17px; --sp-lg:24px; --sp-xl:32px; --sp-xxl:48px; --sp-section:96px;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  --container:1120px; --wide:1280px; --gutter:24px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{font-family:var(--font);background:var(--canvas);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+img,canvas{display:block;max-width:100%}
+.wrap{max-width:var(--container);margin:0 auto;padding:0 var(--gutter)}
+.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--blue);font-weight:600}
+.sec-title{font-size:clamp(26px,3.4vw,40px);font-weight:700;letter-spacing:-.02em;line-height:1.2}
+.sec-lede{color:var(--ink-60);font-size:17px;max-width:62ch;margin-top:14px}
+
+/* ---------- 导航 ---------- */
+.nav{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;display:flex;align-items:center;transition:background .3s,border-color .3s,backdrop-filter .3s;border-bottom:1px solid transparent}
+.nav.is-scrolled{background:rgba(255,255,255,.78);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom-color:var(--hairline)}
+.nav__in{width:100%;max-width:var(--wide);margin:0 auto;padding:0 var(--gutter);display:flex;align-items:center;gap:var(--sp-lg)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em;font-size:16px;white-space:nowrap}
+.brand svg{width:26px;height:26px;flex:none}
+.brand small{color:var(--ink-48);font-weight:500;font-size:11px;letter-spacing:.06em}
+.nav__menu{display:flex;gap:26px;margin-left:auto;font-size:14px;color:var(--ink-60)}
+.nav__menu a{transition:color .2s}
+.nav__menu a:hover{color:var(--blue)}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:var(--r-pill);font-size:14px;font-weight:500;padding:9px 20px;border:1px solid transparent;cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn--primary{background:var(--blue);color:#fff}
+.btn--primary:hover{background:var(--blue-focus)}
+.btn--ghost{border-color:var(--hairline);color:var(--ink)}
+.btn--ghost:hover{border-color:var(--ink-32);background:var(--pearl)}
+.btn--lg{font-size:16px;padding:13px 28px}
+.nav__toggle{display:none;margin-left:auto;background:none;border:0;cursor:pointer;padding:8px}
+.nav__toggle span{display:block;width:20px;height:2px;background:var(--ink);margin:4px 0;transition:.2s}
+
+/* ---------- Hero ---------- */
+.hero{position:relative;padding:132px 0 72px;background:linear-gradient(180deg,#fbfcff 0%,#f5f8fd 55%,var(--canvas) 100%);overflow:hidden}
+.hero__grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:48px;align-items:center;max-width:var(--wide);margin:0 auto;padding:0 var(--gutter)}
+.hero h1{font-size:clamp(34px,5vw,58px);line-height:1.1;letter-spacing:-.03em;font-weight:700;margin:16px 0 0}
+.hero h1 em{font-style:normal;background:linear-gradient(92deg,var(--blue),#50aaff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hero .lede{margin-top:20px;font-size:17px;color:var(--ink-60);max-width:52ch}
+.hero .meta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
+.chip{font-size:12px;color:var(--ink-60);border:1px solid var(--hairline);border-radius:var(--r-pill);padding:5px 12px;background:rgba(255,255,255,.7)}
+.hero__cta{margin-top:30px;display:flex;flex-wrap:wrap;gap:12px}
+.hero__stage{position:relative;aspect-ratio:1/.92;border-radius:var(--r-xl);background:radial-gradient(120% 120% at 50% 18%,#eef5ff 0%,#f7faff 45%,#fff 100%);border:1px solid var(--hairline);overflow:hidden}
+#fx{position:absolute;inset:0;width:100%;height:100%}
+.stage__label{position:absolute;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-48);background:rgba(255,255,255,.82);border:1px solid var(--hairline);border-radius:var(--r-pill);padding:4px 10px;backdrop-filter:blur(6px)}
+.stage__label--a{left:16px;bottom:20px}
+.stage__label--b{left:50%;top:16px;transform:translateX(-50%)}
+.stage__label--c{right:16px;bottom:20px}
+.stage__hud{position:absolute;inset:14px;border-radius:var(--r-lg);pointer-events:none;border:1px solid rgba(30,100,200,.10)}
+.stage__hud::before,.stage__hud::after{content:"";position:absolute;width:14px;height:14px;border:1.5px solid rgba(30,100,200,.45)}
+.stage__hud::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+.stage__hud::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+
+/* ---------- 数据条 ---------- */
+.stats{border-top:1px solid var(--divider);border-bottom:1px solid var(--divider);background:var(--pearl)}
+.stats__in{max-width:var(--container);margin:0 auto;padding:36px var(--gutter);display:grid;grid-template-columns:repeat(4,1fr);gap:24px;text-align:center}
+.stat b{display:block;font-size:clamp(26px,3.2vw,38px);font-weight:700;letter-spacing:-.03em;color:var(--blue-dark)}
+.stat span{font-size:13px;color:var(--ink-48);letter-spacing:.02em}
+
+/* ---------- 通用区块 ---------- */
+.section{padding:var(--sp-section) 0}
+.section--alt{background:var(--parchment)}
+.head{margin-bottom:44px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.card{background:var(--canvas);border:1px solid var(--hairline);border-radius:var(--r-lg);padding:28px 24px;transition:transform .3s,box-shadow .3s,border-color .3s}
+.card:hover{transform:translateY(-4px);box-shadow:0 16px 40px -18px rgba(20,40,72,.22);border-color:#cfdcf0}
+.card h3{font-size:18px;font-weight:650;letter-spacing:-.01em;margin-bottom:10px}
+.card p{font-size:14px;color:var(--ink-60)}
+.card__idx{font-size:12px;color:var(--blue);font-weight:600;letter-spacing:.1em;margin-bottom:12px;display:block}
+
+/* 产品卡 */
+.pcard{display:flex;flex-direction:column;background:var(--canvas);border:1px solid var(--hairline);border-radius:var(--r-xl);padding:30px 26px 26px;position:relative;overflow:hidden;transition:transform .35s,box-shadow .35s,border-color .35s}
+.pcard::after{content:"";position:absolute;left:0;top:0;height:3px;width:100%;background:linear-gradient(90deg,var(--blue),#50aaff);transform:scaleX(0);transform-origin:left;transition:transform .4s}
+.pcard:hover{transform:translateY(-5px);box-shadow:0 24px 56px -24px rgba(20,40,72,.28);border-color:#cfdcf0}
+.pcard:hover::after{transform:scaleX(1)}
+.pcard__tag{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-48);font-weight:600}
+.pcard h3{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:8px 0 4px}
+.pcard h3 sub{font-size:13px;color:var(--ink-48);font-weight:500;letter-spacing:0}
+.pcard p{font-size:14px;color:var(--ink-60);margin-top:12px;flex:1}
+.specs{margin-top:20px;padding-top:18px;border-top:1px solid var(--divider);display:grid;gap:9px}
+.specs div{display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-60)}
+.specs div b{color:var(--ink);font-weight:600}
+.pcard__more{margin-top:20px;font-size:14px;color:var(--blue);font-weight:500}
+.pcard__more::after{content:" →";transition:margin .2s}
+.pcard:hover .pcard__more::after{margin-left:4px}
+
+/* 关于 */
+.about{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:48px;align-items:center}
+.about p{color:var(--ink-60);font-size:16px;margin-top:16px}
+.about__panel{background:linear-gradient(160deg,var(--blue-dark),#1e3455);color:var(--on-dark);border-radius:var(--r-xl);padding:34px 30px}
+.about__panel .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#8cafd7}
+.about__panel blockquote{font-size:22px;font-weight:600;line-height:1.45;letter-spacing:-.01em;margin:14px 0 0}
+.about__panel ul{list-style:none;margin-top:22px;display:grid;gap:12px}
+.about__panel li{font-size:13.5px;color:var(--body-on-dark);padding-left:20px;position:relative}
+.about__panel li::before{content:"";position:absolute;left:0;top:8px;width:7px;height:7px;border-radius:2px;background:#50aaff}
+
+/* CTA */
+.cta{background:linear-gradient(160deg,#12233f,#1b3358 60%,#16294a);color:var(--on-dark);text-align:center;border-radius:var(--r-xl);padding:64px 28px;position:relative;overflow:hidden}
+.cta::before{content:"";position:absolute;inset:0;background:radial-gradient(60% 80% at 50% 0%,rgba(80,170,255,.22),transparent 70%);pointer-events:none}
+.cta h2{font-size:clamp(24px,3.2vw,36px);font-weight:700;letter-spacing:-.02em;position:relative}
+.cta p{color:var(--body-on-dark);margin-top:14px;position:relative}
+.cta__btns{margin-top:28px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;position:relative}
+.cta .btn--ghost{border-color:rgba(255,255,255,.3);color:#fff}
+.cta .btn--ghost:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.5)}
+
+/* 页脚 */
+.footer{background:var(--parchment);border-top:1px solid var(--hairline);padding:56px 0 28px;margin-top:var(--sp-section)}
+.footer__in{max-width:var(--container);margin:0 auto;padding:0 var(--gutter);display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:36px}
+.footer__brand p{font-size:13px;color:var(--ink-48);margin-top:14px;max-width:34ch}
+.footer h4{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-32);margin-bottom:14px}
+.footer ul{list-style:none;display:grid;gap:9px}
+.footer ul a{font-size:13.5px;color:var(--ink-60)}
+.footer ul a:hover{color:var(--blue)}
+.footer__bottom{max-width:var(--container);margin:36px auto 0;padding:20px var(--gutter) 0;border-top:1px solid var(--divider);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--ink-48)}
+
+/* 滚动揭示 */
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+.reveal.is-in{opacity:1;transform:none}
+
+/* 响应式 */
+@media(max-width:1000px){
+  :root{--sp-section:68px}
+  .hero__grid,.about{grid-template-columns:1fr;gap:36px}
+  .hero__stage{max-width:560px;margin:0 auto;width:100%}
+  .grid4{grid-template-columns:repeat(2,1fr)}
+  .grid3{grid-template-columns:1fr}
+  .stats__in{grid-template-columns:repeat(2,1fr);gap:28px}
+  .footer__in{grid-template-columns:1fr 1fr;gap:28px}
+}
+@media(max-width:720px){
+  .nav__menu,.nav .btn{display:none}
+  .nav__toggle{display:block}
+  .nav__menu.is-open{display:flex;position:absolute;top:56px;left:0;right:0;flex-direction:column;gap:0;background:rgba(255,255,255,.96);backdrop-filter:blur(20px);padding:8px 0;border-bottom:1px solid var(--hairline)}
+  .nav__menu.is-open a{padding:14px 24px}
+  .grid4{grid-template-columns:1fr}
+  .cta{padding:48px 22px}
+}
+@media(prefers-reduced-motion:reduce){
+  .reveal{opacity:1;transform:none;transition:none}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ 导航 ============ -->
+<nav class="nav" id="nav">
+  <div class="nav__in">
+    <a class="brand" href="#">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#1e64c8"/><stop offset="1" stop-color="#50aaff"/>
+        </linearGradient></defs>
+        <path d="M16 3l11 4v9c0 7-4.7 11.6-11 13C9.7 27.6 5 23 5 16V7l11-4z" fill="none" stroke="url(#g)" stroke-width="2"/>
+        <path d="M16 10v12M10.5 16h11" stroke="url(#g)" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span>中盾数智<small>ZHONGDUN SHUZHI</small></span>
+    </a>
+    <div class="nav__menu" id="navMenu">
+      <a href="#products">业务与产品</a>
+      <a href="#capability">核心能力</a>
+      <a href="#about">关于我们</a>
+      <a href="#contact">联系我们</a>
+    </div>
+    <a class="btn btn--primary" href="#contact">预约沟通</a>
+    <button class="nav__toggle" id="navToggle" aria-label="菜单"><span></span><span></span><span></span></button>
+  </div>
+</nav>
+
+<!-- ============ Hero ============ -->
+<header class="hero">
+  <div class="hero__grid">
+    <div class="hero__copy">
+      <p class="eyebrow">中盾数智 · 领御低空</p>
+      <h1>低空安全产品方案<br><em>公共安全行业大模型</em></h1>
+      <p class="lede">聚焦低空安全、行业大模型与公共安全场景的人工智能高科技公司。依托 SMCU 智能硬件管控、大模型智能推演等专利技术，构建空天地立体化指挥体系。</p>
+      <div class="meta">
+        <span class="chip">北京 · 2026 年专项骨干企业</span>
+        <span class="chip">全栈自主可控</span>
+        <span class="chip">软硬件一体</span>
+      </div>
+      <div class="hero__cta">
+        <a class="btn btn--primary btn--lg" href="#products">了解领御系列</a>
+        <a class="btn btn--ghost btn--lg" href="#contact">预约业务沟通</a>
+      </div>
+    </div>
+    <div class="hero__stage">
+      <canvas id="fx"></canvas>
+      <div class="stage__hud"></div>
+      <span class="stage__label stage__label--a">低空感知</span>
+      <span class="stage__label stage__label--b">空天地一体 · 智能推演</span>
+      <span class="stage__label stage__label--c">集群指挥</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ 数据条 ============ -->
+<section class="stats">
+  <div class="stats__in">
+    <div class="stat"><b>4 级</b><span>部省州市联动</span></div>
+    <div class="stat"><b>50+</b><span>警务实战场景 Skill</span></div>
+    <div class="stat"><b>48 类+</b><span>数据源接入</span></div>
+    <div class="stat"><b>5 亿+</b><span>业务数据治理</span></div>
+  </div>
+</section>
+
+<!-- ============ 核心能力 ============ -->
+<section class="section" id="capability">
+  <div class="wrap">
+    <div class="head reveal">
+      <p class="eyebrow">Core Data · 核心能力</p>
+      <h2 class="sec-title">一套可落地的低空安全底座</h2>
+      <p class="sec-lede">从云端到业务、从部级到县级、从场景到技能，形成完整的低空安全与公共安全能力闭环。</p>
+    </div>
+    <div class="grid4">
+      <article class="card reveal"><span class="card__idx">01</span><h3>云端融合</h3><p>平台化 · 系统化 · 智能化 · 常态化 · 集群化</p></article>
+      <article class="card reveal"><span class="card__idx">02</span><h3>业务融合</h3><p>统一纳管 · 统一指挥 · 统一赋能 · 统一鉴权 · 统一流转</p></article>
+      <article class="card reveal"><span class="card__idx">03</span><h3>4 级联动</h3><p>部级统筹 · 省级汇聚 · 市级指挥 · 县级落地</p></article>
+      <article class="card reveal"><span class="card__idx">04</span><h3>50+ 场景</h3><p>警务实战场景 Skill，覆盖反恐处突、治安防控、应急救援</p></article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 产品矩阵 ============ -->
+<section class="section section--alt" id="products">
+  <div class="wrap">
+    <div class="head reveal">
+      <p class="eyebrow">Core Product Matrix · 领御系列产品</p>
+      <h2 class="sec-title">领御三剑客：察打管控 · 集群协同 · 智能体</h2>
+      <p class="sec-lede">软硬件一体的产品矩阵，覆盖从低空防御到具身智能协同，再到行业大模型智能体的完整链路。</p>
+    </div>
+    <div class="grid3">
+      <article class="pcard reveal">
+        <span class="pcard__tag">Product 01 · UAV</span>
+        <h3>领御 DX <sub>无人机全域智管平台</sub></h3>
+        <p>察打管控、攻防一体的低空安全治理平台。覆盖 10 大必飞场景，以「一体两翼三体系」架构构建「33110」立体化低空安全服务体系。</p>
+        <div class="specs">
+          <div><span>指令最小发送间隔</span><b>200ms</b></div>
+          <div><span>感知数据吞吐量</span><b>≥10000 条/秒</b></div>
+          <div><span>系统可用性</span><b>99.95%</b></div>
+        </div>
+        <span class="pcard__more">了解 DX 平台</span>
+      </article>
+      <article class="pcard reveal">
+        <span class="pcard__tag">Product 02 · Embodied AI</span>
+        <h3>领御 RX <sub>具身智能合成作战平台</sub></h3>
+        <p>面向无人机、地面机器人、无人车、穿戴式智能装备的分布式协同作战平台，基于「专有接口 + 场景适配 + 本体管控 + 集群行动」四层架构。</p>
+        <div class="specs">
+          <div><span>作业指令下发时延</span><b>100-200ms</b></div>
+          <div><span>在线终端并发</span><b>≥100 台</b></div>
+          <div><span>安全机制</span><b>国密 SM2/SM4</b></div>
+        </div>
+        <span class="pcard__more">了解 RX 平台</span>
+      </article>
+      <article class="pcard reveal">
+        <span class="pcard__tag">Product 03 · Vertical AI</span>
+        <h3>领御 EX <sub>公共安全智能体</sub></h3>
+        <p>面向公共安全领域的垂直大模型与行业智能体，融合六大核心引擎，实现从「咨询问答」到「业务闭环」的跨越。</p>
+        <div class="specs">
+          <div><span>行业场景 Skill</span><b>≥50 个</b></div>
+          <div><span>工具调用成功率</span><b>≥95%</b></div>
+          <div><span>任务完成率</span><b>≥90%</b></div>
+        </div>
+        <span class="pcard__more">了解 EX 智能体</span>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 关于 ============ -->
+<section class="section" id="about">
+  <div class="wrap about">
+    <div class="reveal">
+      <p class="eyebrow">About · 关于我们</p>
+      <h2 class="sec-title">打造有温度的数智世界</h2>
+      <p>北京中盾数智科技有限公司是一家聚焦于低空安全、行业大模型与公共安全场景的人工智能新锐高科技公司，「2026 年产业基础再造和制造业高质量发展专项」在公共安全领域的骨干公司。</p>
+      <p>公司依托 SMCU 智能硬件管控、大模型智能推演等专利技术，推出「中盾领御」系列产品解决方案，实现对低空无人机、多模态机器人的平台化统一管控，以软硬件一体模式构建空天地立体化指挥体系。</p>
+    </div>
+    <aside class="about__panel reveal">
+      <p class="k">Mission</p>
+      <blockquote>以核心技术与产品方案，持续践行「打造有温度的数智世界」。</blockquote>
+      <ul>
+        <li>全栈自主可控的技术底座</li>
+        <li>SMCU 智能硬件管控 · 大模型智能推演</li>
+        <li>低空安全 + AI+ 公共安全场景实践</li>
+        <li>空天地一体 · 软硬件一体</li>
+      </ul>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<section class="section" id="contact">
+  <div class="wrap">
+    <div class="cta reveal">
+      <h2>有场景，缺一个能把 AI 落到低空安全的团队？</h2>
+      <p>从方案评估到系统交付，我们用软硬件一体的方式帮您把低空安全能力真正跑起来。</p>
+      <div class="cta__btns">
+        <a class="btn btn--primary btn--lg" href="#">预约业务沟通</a>
+        <a class="btn btn--ghost btn--lg" href="#products">先看产品介绍</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 页脚 ============ -->
+<footer class="footer">
+  <div class="footer__in">
+    <div class="footer__brand">
+      <a class="brand" href="#">
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M16 3l11 4v9c0 7-4.7 11.6-11 13C9.7 27.6 5 23 5 16V7l11-4z" fill="none" stroke="#1e64c8" stroke-width="2"/>
+          <path d="M16 10v12M10.5 16h11" stroke="#1e64c8" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>中盾数智<small>ZHONGDUN SHUZHI</small></span>
+      </a>
+      <p>北京中盾数智科技有限公司<br>低空安全产品方案 · 公共安全行业大模型</p>
+    </div>
+    <div><h4>网站导航</h4><ul><li><a href="#">首页</a></li><li><a href="#capability">核心能力</a></li><li><a href="#about">关于我们</a></li><li><a href="#contact">联系我们</a></li></ul></div>
+    <div><h4>领御产品</h4><ul><li><a href="#products">领御 DX · 无人机全域智管</a></li><li><a href="#products">领御 RX · 具身智能作战</a></li><li><a href="#products">领御 EX · 公共安全智能体</a></li></ul></div>
+    <div><h4>联系我们</h4><ul><li><a href="#">商务合作（待填）</a></li><li><a href="#">电话（待填）</a></li><li><a href="#">地址：北京（待填）</a></li></ul></div>
+  </div>
+  <div class="footer__bottom">
+    <span>© 2026 北京中盾数智科技有限公司</span>
+    <span>ICP 备案号：待填 · 本页面内容以工商登记信息为准</span>
+  </div>
+</footer>
+
+<script>
+/* ---- 导航滚动 + 移动菜单 + 滚动揭示（无依赖） ---- */
+(function(){
+  var nav=document.getElementById('nav'),toggle=document.getElementById('navToggle'),menu=document.getElementById('navMenu');
+  function onScroll(){nav.classList.toggle('is-scrolled',(window.pageYOffset||0)>16)}
+  window.addEventListener('scroll',onScroll,{passive:true});onScroll();
+  if(toggle){toggle.addEventListener('click',function(){menu.classList.toggle('is-open')});
+    menu.addEventListener('click',function(e){if(e.target.tagName==='A')menu.classList.remove('is-open')});}
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('is-in');io.unobserve(e.target)}})},{threshold:.12});
+  document.querySelectorAll('.reveal').forEach(function(el,i){el.style.transitionDelay=(i%4*70)+'ms';io.observe(el)});
+})();
+</script>
+
+<script type="module">
+/* ============================================================
+   Hero 3D 场景 —— 低空防御穹顶
+   优先 Three.js（真 3D）；不可用时自动降级 Canvas 2D
+   ============================================================ */
+const canvas = document.getElementById('fx');
+const stage  = canvas.parentElement;
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let THREE = null;
+try { THREE = await import('https://unpkg.com/three@0.160.0/build/three.module.js'); }
+catch (e) { THREE = null; }
+
+/* ---------------- Plan B：Canvas 2D 降级 ---------------- */
+if (!THREE) {
+  const ctx = canvas.getContext('2d');
+  let W, H, dpr, t = 0, raf;
+  const dots = [];
+  function resize(){ dpr=Math.min(window.devicePixelRatio||1,2); W=stage.clientWidth; H=stage.clientHeight;
+    canvas.width=W*dpr; canvas.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    dots.length=0; const n = W<600?26:48;
+    for(let i=0;i<n;i++) dots.push({r:Math.random()*0.5+0.18,a:Math.random()*Math.PI*2,h:Math.random()*0.6+0.15,s:(Math.random()*0.3+0.15)});
+  }
+  function frame(){
+    t+=0.016; ctx.clearRect(0,0,W,H);
+    const cx=W/2, cy=H*0.62, R=Math.min(W,H)*0.42;
+    ctx.strokeStyle='rgba(30,100,200,.20)'; ctx.lineWidth=1;
+    for(let k=1;k<=5;k++){ ctx.beginPath(); ctx.ellipse(cx,cy,R*(0.3+k*0.14),R*(0.16+k*0.075),0,Math.PI,Math.PI*2); ctx.stroke(); }
+    for(let k=0;k<10;k++){ const a=k/10*Math.PI; ctx.beginPath(); ctx.moveTo(cx,cy);
+      ctx.lineTo(cx+Math.cos(Math.PI+a)*R*1.0, cy+Math.sin(Math.PI+a)*R*0.55); ctx.stroke(); }
+    dots.forEach(d=>{ d.a += 0.004*d.s;
+      const x=cx+Math.cos(d.a)*R*d.r*1.9, y=cy-Math.sin(d.a)*R*d.r*0.9 - d.h*R*0.3;
+      ctx.fillStyle='rgba(0,102,204,.85)'; ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='rgba(80,170,255,.25)'; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,cy); ctx.stroke(); });
+    if(!reduce) raf=requestAnimationFrame(frame);
+  }
+  resize(); addEventListener('resize',resize); frame();
+  if(reduce) frame();
+} else {
+  /* ---------------- Three.js 真 3D 场景 ---------------- */
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+  camera.position.set(0, 2.6, 7.4);
+  camera.lookAt(0, 1.15, 0);
+
+  const root = new THREE.Group();
+  scene.add(root);
+
+  const BLUE = 0x1e64c8, CYAN = 0x50aaff, LIGHT = 0x8cafd7;
+
+  // 穹顶（上下两层线框半球）
+  function dome(r, seg, opacity, color){
+    const g = new THREE.SphereGeometry(r, seg, Math.round(seg/2), 0, Math.PI*2, 0, Math.PI/2);
+    const m = new THREE.MeshBasicMaterial({ color, wireframe:true, transparent:true, opacity, depthWrite:false });
+    return new THREE.Mesh(g, m);
+  }
+  const domeA = dome(3.15, 30, 0.15, BLUE);
+  const domeB = dome(2.15, 20, 0.22, CYAN);
+  domeB.scale.y = 0.92;
+  root.add(domeA, domeB);
+
+  // 地面网格
+  const grid = new THREE.GridHelper(13, 26, LIGHT, 0xdcebfc);
+  grid.material.transparent = true; grid.material.opacity = 0.42;
+  grid.position.y = 0; root.add(grid);
+
+  // 三区三防：地面同心环
+  const rings = [];
+  [1.1, 1.9, 2.7].forEach((r,i)=>{
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(r, r+0.016, 96),
+      new THREE.MeshBasicMaterial({ color: i===0?CYAN:BLUE, transparent:true, opacity:0.28, side:THREE.DoubleSide, depthWrite:false })
+    );
+    ring.rotation.x = -Math.PI/2; ring.position.y = 0.004; root.add(ring); rings.push(ring);
+  });
+
+  // 无人机节点 + 垂线
+  const drones = [];
+  const droneGeo = new THREE.SphereGeometry(0.045, 8, 8);
+  const droneMat = new THREE.MeshBasicMaterial({ color: BLUE });
+  const N = 16;
+  const lineGeo = new THREE.BufferGeometry();
+  const linePos = new Float32Array(N*6);
+  lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
+  const lineMat = new THREE.LineBasicMaterial({ color: CYAN, transparent:true, opacity:0.22 });
+  const lines = new THREE.LineSegments(lineGeo, lineMat);
+  root.add(lines);
+
+  for (let i=0;i<N;i++){
+    const m = new THREE.Mesh(droneGeo, droneMat.clone());
+    const rad = 1.5 + Math.random()*1.6;
+    const h = 0.5 + Math.random()*2.1;
+    m.userData = { a:Math.random()*Math.PI*2, rad, h, sp:(0.12+Math.random()*0.22)*(Math.random()<.5?-1:1) };
+    root.add(m); drones.push(m);
+  }
+
+  // 扫描环
+  const scan = new THREE.Mesh(
+    new THREE.TorusGeometry(3.2, 0.008, 6, 90),
+    new THREE.MeshBasicMaterial({ color: CYAN, transparent:true, opacity:0.5, depthWrite:false })
+  );
+  scan.rotation.x = Math.PI/2; root.add(scan);
+
+  // 尺寸自适应
+  function resize(){
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w/h; camera.updateProjectionMatrix();
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // 鼠标视差
+  let px = 0, py = 0, tx = 0, ty = 0;
+  stage.addEventListener('pointermove', e=>{
+    const r = stage.getBoundingClientRect();
+    tx = ((e.clientX - r.left)/r.width - .5) * 0.5;
+    ty = ((e.clientY - r.top)/r.height - .5) * 0.35;
+  });
+  stage.addEventListener('pointerleave', ()=>{ tx = 0; ty = 0; });
+
+  // 可见性 / 页面隐藏 → 停车
+  let visible = true;
+  new IntersectionObserver(es=>{ visible = es[0].isIntersecting; }, {threshold:0}).observe(stage);
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) visible=false; else visible=true; });
+
+  const clock = new THREE.Clock();
+  let raf = null;
+  function animate(){
+    raf = requestAnimationFrame(animate);
+    if (!visible) return;
+    const t = clock.getElapsedTime();
+
+    px += (tx - px) * 0.06; py += (ty - py) * 0.06;
+    root.rotation.y = t * 0.09 + px;
+    root.rotation.x = -py * 0.5;
+
+    domeB.rotation.y = -t * 0.22;
+    domeA.rotation.y =  t * 0.06;
+
+    // 无人机轨迹 + 垂线
+    const pos = lineGeo.attributes.position.array;
+    drones.forEach((d, i)=>{
+      const u = d.userData;
+      u.a += 0.006 * u.sp;
+      const x = Math.cos(u.a) * u.rad, z = Math.sin(u.a) * u.rad;
+      const y = u.h + Math.sin(t*0.9 + i) * 0.08;
+      d.position.set(x, y, z);
+      const s = 0.85 + Math.sin(t*2.4 + i)*0.15; d.scale.setScalar(s);
+      pos[i*6]=x; pos[i*6+1]=y; pos[i*6+2]=z;
+      pos[i*6+3]=x; pos[i*6+4]=0; pos[i*6+5]=z;
+    });
+    lineGeo.attributes.position.needsUpdate = true;
+
+    // 扫描环上下扫 + 呼吸
+    const p = (Math.sin(t*0.5)*0.5+0.5);
+    scan.position.y = 0.1 + p*2.6;
+    scan.material.opacity = 0.5 * (1 - Math.abs(p-0.5)*1.2);
+
+    // 三区环呼吸
+    rings.forEach((r,i)=>{ r.material.opacity = 0.16 + 0.16*(0.5+0.5*Math.sin(t*1.1 - i*1.2)); });
+
+    renderer.render(scene, camera);
+  }
+
+  if (reduce){ renderer.render(scene, camera); }
+  else { animate(); }
+}
+</script>
+</body>
+</html>

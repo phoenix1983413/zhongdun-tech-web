@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# build output（通过 gh-pages 分支发布，不入主分支）
+dist/
+
+# macOS
+.DS_Store
+
+# editor
+.vscode/
+.idea/
+*.log

@@ -1,0 +1,193 @@
+/* ============================================================
+   中盾数智 · 设计令牌与基础层
+   基线：参考站设计系统（Apple 风浅色）+ 宣传册品牌色
+   ============================================================ */
+:root{
+  /* 强调色 */
+  --blue:#0066cc; --blue-focus:#0071e3; --blue-on-dark:#2997ff;
+
+  /* 墨色阶 */
+  --ink:#1d1d1f; --ink-80:#333; --ink-60:#4d4d50; --ink-48:#7a7a7a; --ink-32:#a1a1a6;
+
+  /* 画布 */
+  --canvas:#fff; --parchment:#f5f5f7; --pearl:#fafafc;
+
+  /* 品牌深色（宣传册深空蓝） */
+  --navy:#142848; --navy-2:#1b3358; --navy-3:#1e3455;
+
+  /* 高亮（3D 发光 / 数据强调） */
+  --cyan:#50aaff; --cyan-soft:#8cafd7; --blue-brand:#1e64c8;
+
+  /* 线 */
+  --hairline:#e0e0e0; --divider:#f0f0f0;
+  --hairline-dark:rgba(255,255,255,.14); --divider-dark:rgba(255,255,255,.09);
+
+  /* 深色语义 */
+  --on-dark:#fff; --on-dark-muted:#a1a1a6; --body-on-dark:#d2d2d7;
+
+  /* 圆角 */
+  --r-xs:5px; --r-sm:8px; --r-md:11px; --r-lg:18px; --r-xl:28px; --r-pill:9999px;
+
+  /* 间距 */
+  --sp-xxs:4px; --sp-xs:8px; --sp-sm:12px; --sp-md:17px; --sp-lg:24px; --sp-xl:32px; --sp-xxl:48px; --sp-section:96px;
+
+  /* 排版 */
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  --font-mono:"SF Mono",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace;
+
+  /* 结构 */
+  --container:1120px; --wide:1280px; --gutter:24px;
+
+  --shadow:0 16px 40px -18px rgba(20,40,72,.22);
+  --shadow-lg:0 24px 56px -24px rgba(20,40,72,.28);
+}
+
+/* ---------- reset ---------- */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;scroll-padding-top:80px}
+body{
+  font-family:var(--font);background:var(--canvas);color:var(--ink);
+  line-height:1.6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  overflow-x:hidden;
+}
+a{color:inherit;text-decoration:none}
+img,svg,canvas,video{display:block;max-width:100%}
+button,input,textarea,select{font:inherit;color:inherit}
+ul,ol{list-style:none}
+:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:4px}
+
+/* ---------- 排版 ---------- */
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.02em;font-weight:700}
+.h1{font-size:clamp(34px,5vw,58px);line-height:1.08;letter-spacing:-.03em}
+.h2{font-size:clamp(26px,3.4vw,40px)}
+.h3{font-size:clamp(20px,2.2vw,26px)}
+.lede{font-size:17px;color:var(--ink-60)}
+.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--blue);font-weight:600}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.grad{background:linear-gradient(92deg,var(--blue),var(--cyan));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+
+/* ---------- 布局 ---------- */
+.wrap{width:100%;max-width:var(--container);margin:0 auto;padding:0 var(--gutter)}
+.wrap--wide{max-width:var(--wide)}
+.section{padding:var(--sp-section) 0}
+.section--tight{padding:calc(var(--sp-section) * .66) 0}
+.section--alt{background:var(--parchment)}
+.section--dark{background:var(--navy);color:var(--on-dark)}
+.section--dark .lede,.section--dark p{color:var(--body-on-dark)}
+.section--dark .eyebrow{color:var(--cyan)}
+.head{margin-bottom:44px;max-width:760px}
+.head .lede{margin-top:14px}
+.grid{display:grid;gap:22px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:center}
+.stack{display:flex;flex-direction:column;gap:var(--sp-lg)}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border-radius:var(--r-pill);font-size:14px;font-weight:500;
+  padding:10px 22px;border:1px solid transparent;cursor:pointer;
+  transition:background .2s,color .2s,border-color .2s,transform .2s;
+  white-space:nowrap;text-align:center;
+}
+.btn--primary{background:var(--blue);color:#fff}
+.btn--primary:hover{background:var(--blue-focus)}
+.btn--ghost{border-color:var(--hairline);color:var(--ink);background:transparent}
+.btn--ghost:hover{border-color:var(--ink-32);background:var(--pearl)}
+.btn--light{background:#fff;color:var(--navy)}
+.btn--light:hover{background:#eef4ff}
+.btn--ghost-light{border-color:rgba(255,255,255,.32);color:#fff}
+.btn--ghost-light:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.55)}
+.btn--lg{font-size:16px;padding:13px 28px}
+.btn--block{width:100%}
+.btn-row{display:flex;flex-wrap:wrap;gap:12px}
+
+/* ---------- 通用卡片 ---------- */
+.card{
+  background:var(--canvas);border:1px solid var(--hairline);border-radius:var(--r-lg);
+  padding:28px 24px;transition:transform .3s,box-shadow .3s,border-color .3s;
+}
+.card:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:#cfdcf0}
+.card h3{font-size:18px;font-weight:650;margin-bottom:10px}
+.card p{font-size:14px;color:var(--ink-60)}
+.card__idx{display:block;font-size:12px;color:var(--blue);font-weight:600;letter-spacing:.1em;margin-bottom:12px}
+.card__icon{width:38px;height:38px;margin-bottom:16px;color:var(--blue)}
+
+/* ---------- 徽标 ---------- */
+.chip{
+  display:inline-block;font-size:12px;color:var(--ink-60);
+  border:1px solid var(--hairline);border-radius:var(--r-pill);
+  padding:5px 12px;background:rgba(255,255,255,.7);
+}
+.chip-row{display:flex;flex-wrap:wrap;gap:10px}
+
+/* ---------- 页脚 ---------- */
+.footer{background:var(--parchment);border-top:1px solid var(--hairline);padding:56px 0 28px}
+.footer__grid{display:grid;grid-template-columns:1.7fr 1fr 1fr 1fr;gap:36px}
+.footer__desc{font-size:13px;color:var(--ink-48);margin-top:14px;max-width:36ch}
+.footer h4{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-32);margin-bottom:14px;font-weight:600}
+.footer li+li{margin-top:9px}
+.footer li a{font-size:13.5px;color:var(--ink-60)}
+.footer li a:hover{color:var(--blue)}
+.footer__bottom{
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  margin-top:36px;padding-top:20px;border-top:1px solid var(--divider);
+  font-size:12px;color:var(--ink-48);
+}
+
+/* ---------- 表单 ---------- */
+.form{display:grid;gap:18px}
+.field{display:grid;gap:7px}
+.field label{font-size:13px;font-weight:500;color:var(--ink-80)}
+.field input,.field textarea,.field select{
+  width:100%;padding:12px 14px;border:1px solid var(--hairline);border-radius:var(--r-md);
+  background:#fff;font-size:14px;transition:border-color .2s,box-shadow .2s;
+}
+.field input:focus,.field textarea:focus,.field select:focus{
+  outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,102,204,.12);
+}
+.field textarea{min-height:132px;resize:vertical}
+.form__note{font-size:12px;color:var(--ink-48)}
+
+/* ---------- 滚动揭示 ----------
+   用独立的 translate 属性，避免与 .card:hover 的 transform 冲突；
+   并带 2.6s 兜底动画：即使脚本未执行，内容也不会永久隐藏。 */
+@keyframes revealFailsafe{to{opacity:1;translate:0 0}}
+.reveal{
+  opacity:0;translate:0 22px;
+  transition:opacity .7s cubic-bezier(.2,.7,.2,1),translate .7s cubic-bezier(.2,.7,.2,1);
+  animation:revealFailsafe .5s ease 2.6s forwards;
+}
+.reveal.is-in{opacity:1;translate:0 0}
+
+/* ---------- 工具 ---------- */
+.skip{position:absolute;left:-9999px;top:0;background:var(--blue);color:#fff;padding:10px 16px;border-radius:0 0 var(--r-sm) 0;z-index:999}
+.skip:focus{left:0}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- 响应式 ---------- */
+@media(max-width:1000px){
+  :root{--sp-section:68px}
+  .split{grid-template-columns:1fr;gap:36px}
+  .g4{grid-template-columns:repeat(2,1fr)}
+  .g3{grid-template-columns:repeat(2,1fr)}
+  .footer__grid{grid-template-columns:1fr 1fr;gap:28px}
+}
+@media(max-width:720px){
+  :root{--gutter:20px}
+  .g2,.g3,.g4,.g3,.footer__grid{grid-template-columns:1fr}
+  .g4{grid-template-columns:1fr}
+  .btn-row .btn{flex:1 1 auto}
+}
+@media(prefers-reduced-motion:reduce){
+  .reveal{opacity:1;translate:none;transition:none;animation:none}
+  html{scroll-behavior:auto}
+  *{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+
+/* ---------- 打印 ---------- */
+@media print{
+  .nav,.footer,.no-print{display:none !important}
+}
