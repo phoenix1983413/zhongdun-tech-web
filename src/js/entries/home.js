@@ -1,6 +1,6 @@
 import '../../styles/base.css';
 import '../../styles/components.css';
 import '../site.js';
-import { heroDome } from '../scenes.js';
+import { heroEarth } from '../scenes.js';
 
-heroDome(document.getElementById('fx'));
+heroEarth(document.getElementById('fx'));

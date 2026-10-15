@@ -1,6 +1,6 @@
 /* ============================================================
    Three.js 场景集 v2 ·「深空指挥舱」
-   - 首页 Hero：低空防御穹顶（Defense Dome）
+   - 首页 Hero：交互地球（Interactive Earth，真实贴图 + 拖拽/滚轮轨道控制）
    - DX：三维电子沙盘（Tactical Sandbox）
    - RX：多智能体协同网络（Swarm Mesh）
    - EX：知识图谱星云（Knowledge Nebula）
@@ -73,7 +73,6 @@ function makeGlowTexture(THREE, renderer) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   glowTex = t;
-  if (renderer) renderer.userData.__glow = t;
   return t;
 }
 
@@ -134,16 +133,17 @@ function makeSkyTexture(THREE, variant) {
 }
 
 /* 由天空纹理生成 IBL 环境贴图（金属/玻璃有真实反射） */
+let envTexture = null;
 function makeEnv(THREE, renderer, skyTex) {
   try {
-    if (!renderer.userData.__env) {
+    if (!envTexture) {
       const pmrem = new THREE.PMREMGenerator(renderer);
       pmrem.compileEquirectangularShader();
       const rt = pmrem.fromEquirectangular(skyTex);
       pmrem.dispose();
-      renderer.userData.__env = rt.texture;
+      envTexture = rt.texture;
     }
-    return renderer.userData.__env;
+    return envTexture;
   } catch (e) {
     return null;
   }
@@ -344,12 +344,13 @@ async function mount(canvas, variant, build) {
   if (!canvas) return;
   const stage = canvas.parentElement || canvas;
   const THREE = await loadThree();
-  if (!THREE) { fallback2d(canvas, variant); return; }
+  if (!THREE) { console.warn('[scene] three 加载失败，降级 Canvas2D'); fallback2d(canvas, variant); return; }
 
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   } catch (e) {
+    console.warn('[scene] renderer 创建失败，降级 Canvas2D:', e);
     fallback2d(canvas, variant);
     return;
   }
@@ -412,11 +413,14 @@ async function mount(canvas, variant, build) {
           c.setPixelRatio(Math.min(dpr, 1.5));
           c.setSize(w, h);
           c.addPass(new RP.RenderPass(scene, camera));
+          const tune = variant === 'earth' ? [0.5, 0.92]
+                     : variant === 'graph' ? [0.62, 0.58]
+                     : [0.55, 0.58];
           const bloom = new UB.UnrealBloomPass(
             new THREE.Vector2(w, h),
-            variant === 'graph' ? 0.62 : 0.55,  // strength
-            0.72,                                 // radius
-            0.58                                  // threshold
+            tune[0],   // strength
+            0.72,      // radius
+            tune[1]    // threshold
           );
           c.addPass(bloom);
           c.addPass(new OP.OutputPass());
@@ -429,6 +433,7 @@ async function mount(canvas, variant, build) {
 
     startScene({ THREE, stage, scene, camera, renderer, update, composer });
   } catch (e) {
+    console.warn('[scene] 场景构建失败，降级 Canvas2D:', e);
     try { renderer.dispose(); } catch (_) {}
     const cv = document.createElement('canvas');
     cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
@@ -438,247 +443,197 @@ async function mount(canvas, variant, build) {
 }
 
 /* ============================================================
-   1) 首页 Hero —— 低空防御穹顶
+   1) 首页 Hero —— 交互地球（Interactive Earth）
+   - 真实地表贴图（NASA 影像：昼图/法线/高光/夜光/云层，随 BASE_URL 加载）
+   - Phong 材质 + 方向光昼夜明暗 + 夜面城市灯光（emissiveMap）
+   - Fresnel 大气辉光（BackSide + Additive）+ 3D 星空 + 倾斜轨道卫星
+   - 拖拽 = 轨道旋转（阻尼） / 滚轮 = 距离缩放（钳制）
+   - 闲置 2.4s 后恢复缓慢自转；贴图加载失败降级为纯色球体
    ============================================================ */
-export function heroDome(canvas) {
-  return mount(canvas, 'dome', ({ THREE, scene, camera, glow, beam, parallax }) => {
-    camera.position.set(0, 2.9, 7.6);
-    camera.lookAt(0, 1.2, 0);
+export function heroEarth(canvas) {
+  return mount(canvas, 'earth', ({ THREE, renderer, scene, camera, stage, glow, lights }) => {
+    camera.position.set(0, 0.9, 8.1);
+    camera.lookAt(0, 0, 0);
 
-    const root = new THREE.Group();
-    scene.add(root);
+    /* 夜半球要暗下去，城市灯光才成立 —— 收缩环境系光源 */
+    lights.hemi.intensity = 0.22;
+    lights.rim.intensity = 0.1;
+    lights.ptA.intensity = 5;
+    lights.ptB.intensity = 0;
 
-    // ---------- 地面网格 ----------
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(9, 72),
-      new THREE.MeshBasicMaterial({
-        map: makeGridTexture(THREE, 1, 24, false),
-        transparent: true, opacity: 0.30, depthWrite: false,
+    /* ---------- 贴图异步加载（失败自动降级纯色球） ---------- */
+    const BASE = (import.meta.env && import.meta.env.BASE_URL) || '/';
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    const loadT = (p) => new Promise((res) => loader.load(
+      BASE + 'textures/' + p, (t) => res(t), undefined, () => res(null)
+    ));
+    const maxAniso = renderer.capabilities
+      ? Math.min(4, renderer.capabilities.getMaxAnisotropy())
+      : 1;
+
+    /* ---------- 地球本体 ---------- */
+    const R = 2.3;
+    const globe = new THREE.Group();
+    scene.add(globe);
+
+    const earthMat = new THREE.MeshPhongMaterial({
+      color: 0x9db8d8,                      // 贴图就位前的过渡色
+      specular: new THREE.Color(0x2a3a52),  // 海面高光（配合 specularMap）
+      shininess: 16,
+    });
+    const earth = new THREE.Mesh(new THREE.SphereGeometry(R, 72, 72), earthMat);
+    globe.add(earth);
+
+    /* 云层（贴图到位后再淡入） */
+    const cloudMat = new THREE.MeshLambertMaterial({
+      color: 0xffffff, transparent: true, opacity: 0, depthWrite: false,
+    });
+    const clouds = new THREE.Mesh(new THREE.SphereGeometry(R * 1.012, 48, 48), cloudMat);
+    globe.add(clouds);
+
+    /* 大气辉光：BackSide fresnel */
+    const atmo = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 1.1, 48, 48),
+      new THREE.ShaderMaterial({
+        transparent: true, side: THREE.BackSide, depthWrite: false,
         blending: THREE.AdditiveBlending,
+        uniforms: { uColor: { value: new THREE.Color(0x3f9dff) } },
+        vertexShader: [
+          'varying vec3 vN; varying vec3 vP;',
+          'void main(){',
+          '  vN = normalize(normalMatrix * normal);',
+          '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+          '  vP = mv.xyz;',
+          '  gl_Position = projectionMatrix * mv;',
+          '}',
+        ].join('\n'),
+        fragmentShader: [
+          'uniform vec3 uColor; varying vec3 vN; varying vec3 vP;',
+          'void main(){',
+          '  float f = pow(clamp(1.0 + dot(normalize(vP), vN), 0.0, 1.0), 4.2);',
+          '  gl_FragColor = vec4(uColor, 1.0) * f * 0.24;',
+          '}',
+        ].join('\n'),
       })
     );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.004;
-    root.add(ground);
+    globe.add(atmo);
 
-    // 地面反光晕
-    const floorHalo = new THREE.Mesh(
-      new THREE.CircleGeometry(5.2, 64),
+    /* ---------- 倾斜轨道 + 巡航卫星（呼应「空天地一体」） ---------- */
+    const orbit = new THREE.Group();
+    orbit.rotation.set(0.52, 0, 0.34);
+    scene.add(orbit);
+    orbit.add(new THREE.Mesh(
+      new THREE.TorusGeometry(R * 1.55, 0.005, 5, 128),
       new THREE.MeshBasicMaterial({
-        color: 0x1e64c8, transparent: true, opacity: 0.14,
-        depthWrite: false, blending: THREE.AdditiveBlending,
-      })
-    );
-    floorHalo.rotation.x = -Math.PI / 2;
-    floorHalo.position.y = 0.002;
-    root.add(floorHalo);
-
-    // ---------- 双层穹顶 ----------
-    function dome(r, seg, opacity, color, scaleY) {
-      const g = new THREE.SphereGeometry(r, seg, Math.round(seg / 2), 0, Math.PI * 2, 0, Math.PI / 2);
-      const m = new THREE.MeshStandardMaterial({
-        color, emissive: color, emissiveIntensity: 1.5,
-        wireframe: true, transparent: true, opacity,
-        metalness: 0.4, roughness: 0.5, depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(g, m);
-      if (scaleY) mesh.scale.y = scaleY;
-      return mesh;
-    }
-    const domeA = dome(3.2, 34, 0.28, C.brand, 1);
-    const domeB = dome(2.2, 22, 0.42, C.cyan, 0.94);
-    root.add(domeA, domeB);
-
-    // 穹顶骨架环（更强的结构感）
-    const hoops = [];
-    [1.0, 1.9, 2.8].forEach((r, i) => {
-      const h = new THREE.Mesh(
-        new THREE.TorusGeometry(r, 0.006, 5, 96),
-        new THREE.MeshStandardMaterial({
-          color: i === 0 ? C.bright : C.cyan, emissive: i === 0 ? C.bright : C.cyan,
-          emissiveIntensity: 2.4, metalness: 0.3, roughness: 0.4,
-        })
-      );
-      h.rotation.x = Math.PI / 2;
-      h.position.y = Math.sqrt(Math.max(0, 3.2 * 3.2 - r * r)) * 0.98;
-      root.add(h);
-      hoops.push(h);
-    });
-
-    // ---------- 中枢核心 ----------
-    const coreGroup = new THREE.Group();
-    coreGroup.position.y = 0.62;
-    root.add(coreGroup);
-
-    const core = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.2, 1),
-      new THREE.MeshStandardMaterial({
-        color: C.pale, emissive: C.bright, emissiveIntensity: 2.6,
-        metalness: 0.9, roughness: 0.18,
-      })
-    );
-    coreGroup.add(core);
-    coreGroup.add(halo(THREE, glow, C.cyan, 1.35, 0.85));
-
-    const coreRings = [];
-    for (let i = 0; i < 3; i++) {
-      const rg = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34 + i * 0.075, 0.0055, 5, 72),
-        new THREE.MeshStandardMaterial({
-          color: C.cyan, emissive: C.cyan, emissiveIntensity: 2.2,
-          metalness: 0.4, roughness: 0.4, transparent: true, opacity: 0.9,
-        })
-      );
-      rg.rotation.set(Math.PI / 2 + i * 0.5, i * 0.9, i * 0.4);
-      coreGroup.add(rg);
-      coreRings.push(rg);
-    }
-
-    // ---------- 无人机集群（几何体 + 辉光 + 垂光柱） ----------
-    const N = 16;
-    const drones = [];
-    const beamGeo = new THREE.PlaneGeometry(0.05, 1);
-    beamGeo.translate(0, -0.5, 0);
-    const beamMat = new THREE.MeshBasicMaterial({
-      map: beam, color: C.bright, transparent: true, opacity: 0.5,
-      depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    });
-    const droneGeo = new THREE.OctahedronGeometry(0.055, 0);
-    const droneMat = new THREE.MeshStandardMaterial({
-      color: 0xeaf4ff, emissive: C.bright, emissiveIntensity: 2.4,
-      metalness: 0.7, roughness: 0.25,
-    });
-
-    for (let i = 0; i < N; i++) {
-      const grp = new THREE.Group();
-      const mesh = new THREE.Mesh(droneGeo, droneMat);
-      mesh.rotation.set(0.4, i * 0.7, 0.2);
-      const h = halo(THREE, glow, C.cyan, 0.34, 0.9);
-      const bm = new THREE.Mesh(beamGeo, beamMat);
-      grp.add(mesh, h, bm);
-      grp.userData = {
-        a: (i / N) * Math.PI * 2 + Math.random() * 0.4,
-        rad: 1.45 + Math.random() * 1.7,
-        hgt: 0.5 + Math.random() * 2.15,
-        sp: (0.12 + Math.random() * 0.22) * (Math.random() < 0.5 ? -1 : 1),
-        mesh, bm, baseH: 0,
-      };
-      root.add(grp);
-      drones.push(grp);
-    }
-
-    // 轨迹连线
-    const linePos = new Float32Array(N * 6);
-    const lineGeo = new THREE.BufferGeometry();
-    lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
-    const lines = new THREE.LineSegments(
-      lineGeo,
-      new THREE.LineBasicMaterial({
-        color: C.cyan, transparent: true, opacity: 0.22,
+        color: 0x50aaff, transparent: true, opacity: 0.3,
         blending: THREE.AdditiveBlending, depthWrite: false,
       })
-    );
-    root.add(lines);
+    ));
+    const sat = new THREE.Group();
+    sat.add(new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.05, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0xeaf4ff, emissive: 0x7cc6ff, emissiveIntensity: 2.6,
+        metalness: 0.7, roughness: 0.25,
+      })
+    ));
+    sat.add(halo(THREE, glow, 0x50aaff, 0.4, 0.9));
+    orbit.add(sat);
 
-    // ---------- 三区同心环 ----------
-    const rings = [];
-    [[1.1, C.bright, 0.55], [1.9, C.cyan, 0.42], [2.7, C.brand, 0.3]].forEach(([r, color, op]) => {
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(r, r + 0.018, 128),
-        new THREE.MeshBasicMaterial({
-          color, transparent: true, opacity: op,
-          side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
-        })
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.y = 0.006;
-      root.add(ring);
-      rings.push(ring);
+    /* ---------- 3D 星空（fog 关闭，避免被雾吃掉） ---------- */
+    const SN = 1400;
+    const spos = new Float32Array(SN * 3);
+    for (let i = 0; i < SN; i++) {
+      const r = 24 + Math.random() * 24;
+      const th = Math.random() * Math.PI * 2;
+      const ph = Math.acos(2 * Math.random() - 1);
+      spos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+      spos[i * 3 + 1] = r * Math.cos(ph);
+      spos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+    }
+    const sgeo = new THREE.BufferGeometry();
+    sgeo.setAttribute('position', new THREE.BufferAttribute(spos, 3));
+    const stars = new THREE.Points(sgeo, new THREE.PointsMaterial({
+      map: glow, color: 0xcfe4ff, size: 0.55, transparent: true, opacity: 0.85,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+      sizeAttenuation: true, fog: false,
+    }));
+    scene.add(stars);
+
+    /* ---------- 拖拽 / 滚轮 轨道控制（阻尼 + 闲置自转） ---------- */
+    const LATMAX = 1.15, DMIN = 4.6, DMAX = 10.5;
+    const ctrl = {
+      lon: 1.1, lat: 0.28, dist: 8.1,
+      tLon: 1.1, tLat: 0.28, tDist: 8.1,
+      drag: false, px: 0, py: 0, last: -1e5,
+    };
+    stage.style.touchAction = 'pan-y';   // 移动端保留纵向滚屏
+    stage.style.cursor = 'grab';
+
+    stage.addEventListener('pointerdown', (e) => {
+      ctrl.drag = true; ctrl.px = e.clientX; ctrl.py = e.clientY;
+      ctrl.last = performance.now();
+      stage.style.cursor = 'grabbing';
+      try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!ctrl.drag) return;
+      const dx = e.clientX - ctrl.px, dy = e.clientY - ctrl.py;
+      ctrl.px = e.clientX; ctrl.py = e.clientY;
+      ctrl.tLon -= dx * 0.0045;
+      ctrl.tLat = Math.max(-LATMAX, Math.min(LATMAX, ctrl.tLat + dy * 0.0035));
+      ctrl.last = performance.now();
+    });
+    const endDrag = () => { ctrl.drag = false; stage.style.cursor = 'grab'; };
+    stage.addEventListener('pointerup', endDrag);
+    stage.addEventListener('pointercancel', endDrag);
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      ctrl.tDist = Math.max(DMIN, Math.min(DMAX, ctrl.tDist + d * 0.0035));
+      ctrl.last = performance.now();
+    }, { passive: false });
+
+    /* ---------- 贴图就位 ---------- */
+    Promise.all([
+      loadT('earth_atmos_2048.jpg'),   // 昼面色彩
+      loadT('earth_normal_2048.jpg'),  // 地形法线
+      loadT('earth_specular_2048.jpg'),// 海陆高光分离
+      loadT('earth_lights_2048.png'),  // 夜面城市灯光
+      loadT('earth_clouds_1024.png'),  // 云层
+    ]).then(([map, nrm, spc, lit, cld]) => {
+      if (map) { map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = maxAniso; earthMat.map = map; earthMat.color.set(0xffffff); }
+      if (nrm) { nrm.anisotropy = maxAniso; earthMat.normalMap = nrm; earthMat.normalScale.set(0.85, 0.85); }
+      if (spc) { spc.anisotropy = maxAniso; earthMat.specularMap = spc; }
+      if (lit) { lit.colorSpace = THREE.SRGBColorSpace; earthMat.emissiveMap = lit; earthMat.emissive = new THREE.Color(0xffd9a0); earthMat.emissiveIntensity = 1.15; }
+      if (cld) { cld.colorSpace = THREE.SRGBColorSpace; cld.anisotropy = maxAniso; cloudMat.map = cld; cloudMat.opacity = 0.5; }
+      earthMat.needsUpdate = true; cloudMat.needsUpdate = true;
     });
 
-    // ---------- 垂直扫描环 ----------
-    const scan = new THREE.Mesh(
-      new THREE.TorusGeometry(3.2, 0.0075, 6, 110),
-      new THREE.MeshStandardMaterial({
-        color: C.bright, emissive: C.bright, emissiveIntensity: 3,
-        metalness: 0, roughness: 1, transparent: true, opacity: 0.9,
-      })
-    );
-    scan.rotation.x = Math.PI / 2;
-    root.add(scan);
-
-    // ---------- 星尘 ----------
-    const P = 260;
-    const ppos = new Float32Array(P * 3);
-    for (let i = 0; i < P; i++) {
-      const r = 3.4 + Math.random() * 4.6;
-      const th = Math.random() * Math.PI * 2;
-      ppos[i * 3] = Math.cos(th) * r;
-      ppos[i * 3 + 1] = Math.random() * 3.4 - 1.6;
-      ppos[i * 3 + 2] = Math.sin(th) * r;
-    }
-    const pgeo = new THREE.BufferGeometry();
-    pgeo.setAttribute('position', new THREE.BufferAttribute(ppos, 3));
-    const dust = new THREE.Points(pgeo, new THREE.PointsMaterial({
-      map: glow, color: C.light, size: 0.14, transparent: true, opacity: 0.55,
-      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
-    }));
-    root.add(dust);
-
+    /* ---------- 逐帧 ---------- */
+    const sph = new THREE.Spherical();
     return (t) => {
-      const p = parallax.step();
-      root.rotation.y = t * 0.075 + p.x * 0.3;
-      root.rotation.x = -p.y * 0.14;
-      domeB.rotation.y = -t * 0.2;
-      domeA.rotation.y = t * 0.055;
-      domeA.material.opacity = 0.24 + 0.09 * (0.5 + 0.5 * Math.sin(t * 0.7));
+      /* 闲置 2.4s 后恢复缓慢自转 */
+      if (!ctrl.drag && performance.now() - ctrl.last > 2400) ctrl.tLon += 0.0009;
 
-      // 核心脉动
-      core.rotation.y = t * 0.8;
-      core.rotation.x = t * 0.42;
-      const cp = 1 + Math.sin(t * 2.1) * 0.09;
-      core.scale.setScalar(cp);
-      coreRings.forEach((r, i) => {
-        r.rotation.z = t * (0.5 + i * 0.28) * (i % 2 ? -1 : 1);
-        r.rotation.y = t * (0.3 + i * 0.16);
-      });
+      ctrl.lon += (ctrl.tLon - ctrl.lon) * 0.075;
+      ctrl.lat += (ctrl.tLat - ctrl.lat) * 0.075;
+      ctrl.dist += (ctrl.tDist - ctrl.dist) * 0.09;
 
-      // 无人机
-      const pos = lineGeo.attributes.position.array;
-      for (let i = 0; i < N; i++) {
-        const d = drones[i], u = d.userData;
-        u.a += 0.006 * u.sp;
-        const x = Math.cos(u.a) * u.rad;
-        const z = Math.sin(u.a) * u.rad;
-        const y = u.hgt + Math.sin(t * 0.9 + i) * 0.085;
-        d.position.set(x, y, z);
-        u.mesh.rotation.y += 0.02;
-        // 垂光柱长度随高度
-        u.bm.scale.y = y;
-        u.bm.position.y = 0;
-        pos[i * 6] = x; pos[i * 6 + 1] = y; pos[i * 6 + 2] = z;
-        pos[i * 6 + 3] = x; pos[i * 6 + 4] = 0; pos[i * 6 + 5] = z;
-      }
-      lineGeo.attributes.position.needsUpdate = true;
+      sph.set(ctrl.dist, Math.PI / 2 - ctrl.lat, ctrl.lon);
+      camera.position.setFromSpherical(sph);
+      camera.lookAt(0, 0, 0);
 
-      // 扫描环上下巡游
-      const k = Math.sin(t * 0.5) * 0.5 + 0.5;
-      scan.position.y = 0.08 + k * 2.75;
-      const sc = 0.5 + 0.5 * Math.sin(t * 0.5);
-      scan.scale.setScalar(0.32 + sc * 0.68);
-      scan.material.opacity = 0.85 * (1 - Math.abs(k - 0.5) * 1.15);
-
-      rings.forEach((r, i) => {
-        r.material.opacity = (0.24 + 0.34 * (0.5 + 0.5 * Math.sin(t * 1.1 - i * 1.2)));
-      });
-      hoops.forEach((h, i) => {
-        h.material.emissiveIntensity = 1.8 + 1.4 * (0.5 + 0.5 * Math.sin(t * 1.4 - i * 0.9));
-      });
-
-      dust.rotation.y = -t * 0.03;
+      earth.rotation.y = t * 0.02;          // 地球自转（极缓）
+      clouds.rotation.y = t * 0.028 + 0.4;  // 云层稍快
+      sat.position.set(Math.cos(t * 0.24) * R * 1.55, 0, Math.sin(t * 0.24) * R * 1.55);
+      sat.rotation.y = t * 1.2;
+      stars.rotation.y = t * 0.0045;
     };
   });
 }
+
 
 /* ============================================================
    2) DX —— 三维电子沙盘
