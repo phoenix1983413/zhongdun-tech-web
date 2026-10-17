@@ -26,8 +26,8 @@
 .nav.is-scrolled::after{opacity:1}
 .nav__in{position:relative;width:100%;max-width:var(--wide);margin:0 auto;padding:0 var(--gutter);display:flex;align-items:center;gap:var(--sp-lg)}
 .brand{display:flex;align-items:center;gap:11px;font-weight:700;font-size:16px;white-space:nowrap;letter-spacing:-.01em}
-.brand svg{width:30px;height:30px;flex:none;filter:drop-shadow(0 2px 8px rgba(30,100,200,.35));transition:transform var(--t) var(--ease-spring),filter var(--t)}
-.brand:hover svg{transform:scale(1.06) rotate(-3deg);filter:drop-shadow(0 3px 14px rgba(80,170,255,.6))}
+.brand svg,.brand img{display:block;width:30px;height:30px;flex:none;filter:drop-shadow(0 2px 8px rgba(30,100,200,.35));transition:transform var(--t) var(--ease-spring),filter var(--t)}
+.brand:hover svg,.brand:hover img{transform:scale(1.06) rotate(-3deg);filter:drop-shadow(0 3px 14px rgba(80,170,255,.6))}
 .brand__txt{display:flex;flex-direction:column;line-height:1.1}
 .brand__txt small{font-size:9.5px;letter-spacing:.14em;color:var(--ink-48);font-weight:600;margin-top:1px}
 .nav__menu{display:flex;gap:4px;margin-left:auto;font-size:14px;color:var(--ink-60);position:relative}
